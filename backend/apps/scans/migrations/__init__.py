@@ -1,0 +1,1 @@
+# apps.scans migrations init

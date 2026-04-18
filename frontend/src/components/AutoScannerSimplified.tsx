@@ -1,0 +1,693 @@
+/**
+ * Composant Auto-Scanner Simplifié
+ * Affiche UNIQUEMENT le scanner auto-sélectionné par l'LLM
+ * Pas d'autres boutons de scanner
+ */
+
+import React, { useState, useEffect } from 'react';
+import { Globe, Shield, Box, Check, Loader2, Settings } from 'lucide-react';
+import useAutoScannerSelection from '../hooks/useAutoScannerSelection';
+import api, { endpoints } from '../api/client';
+
+interface AutoScannerSimplifiedProps {
+  repoFullName: string;
+  cloneUrl: string;
+  repoName: string;
+  repoOwner: string;
+  onScannerSelected?: (scanner: string) => void;
+  onAnalysisComplete?: (data: any) => void;
+  onScanStart?: () => void;
+  onScanStatusChange?: (type: 'sast' | 'sca' | 'dast', isScanning: boolean) => void;
+  className?: string;
+  customToken?: string;
+  repoLanguage?: string;
+}
+
+interface ScannerInfo {
+  name: string;
+  icon: string;
+  color: string;
+  description: string;
+}
+
+const SCANNER_INFO: Record<string, ScannerInfo> = {
+  bandit: {
+    name: 'Bandit',
+    icon: '🐍',
+    color: '#3776ab',
+    description: 'Python Security Scanner'
+  },
+  eslint: {
+    name: 'ESLint',
+    icon: '📝',
+    color: '#4b32c3',
+    description: 'JavaScript/TypeScript Linter'
+  },
+  sonarcloud: {
+    name: 'SonarCloud',
+    icon: '☁️',
+    color: '#1e90ff',
+    description: 'Multi-Language Code Quality'
+  },
+  semgrep: {
+    name: 'Semgrep',
+    icon: '🔍',
+    color: '#ffa500',
+    description: 'Pattern-Based Analysis'
+  },
+  cppcheck: {
+    name: 'Cppcheck',
+    icon: '⚙️',
+    color: '#00a8ff',
+    description: 'C/C++ Static Analysis'
+  },
+  gosec: {
+    name: 'Gosec',
+    icon: '🔐',
+    color: '#00add8',
+    description: 'Go Security Scanner'
+  },
+  psalm: {
+    name: 'Psalm',
+    icon: '✨',
+    color: '#7367f0',
+    description: 'PHP Static Analysis'
+  },
+  brakeman: {
+    name: 'Brakeman',
+    icon: '🛡️',
+    color: '#cc342d',
+    description: 'Ruby on Rails Security'
+  },
+  clippy: {
+    name: 'Clippy',
+    icon: '🦀',
+    color: '#ce422b',
+    description: 'Rust Linter'
+  },
+  detekt: {
+    name: 'Detekt',
+    icon: '🎯',
+    color: '#7f52ff',
+    description: 'Kotlin Static Analysis'
+  },
+  zap: {
+    name: 'OWASP ZAP',
+    icon: '🌐',
+    color: '#ef4444',
+    description: 'Dynamic Application Security Testing'
+  },
+};
+
+export function AutoScannerSimplified({
+  repoFullName,
+  cloneUrl,
+  repoName,
+  repoOwner,
+  onScannerSelected,
+  onAnalysisComplete,
+  onScanStart,
+  onScanStatusChange,
+  className = '',
+  customToken,
+  repoLanguage,
+}: AutoScannerSimplifiedProps) {
+  const { selectScanners, autoScan, loading, error, progress } = useAutoScannerSelection();
+
+  const [selectedScanner, setSelectedScanner] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<any>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scaScanning, setScaScanning] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [currentPhase, setCurrentPhase] = useState<string | null>(null);
+  const [enabledScanners, setEnabledScanners] = useState({
+    sast: false,
+    sca: false,
+    dast: false
+  });
+
+
+
+  // Auto-detect scanner on mount
+  useEffect(() => {
+    detectAndSelectScanner();
+  }, [repoFullName]);
+
+  const detectAndSelectScanner = async () => {
+    try {
+      const result = await selectScanners(repoFullName, cloneUrl, repoName, repoOwner, customToken);
+
+      if (result.success && result.suggested_scanners.length > 0) {
+        // Take the first (best) scanner
+        const bestScanner = result.suggested_scanners[0];
+        setSelectedScanner(bestScanner);
+        setAnalysis(result);
+
+        // Only call onScannerSelected if we don't already have one selected or if it's the first detection
+        // to avoid reverting manual selections (like Trivy)
+        if (!selectedScanner) {
+          onScannerSelected?.(bestScanner);
+        }
+      }
+    } catch (err) {
+      console.error('Auto-detection failed:', err);
+    }
+  };
+
+  const handleLaunchScan = async () => {
+    setScanning(true);
+    setLocalError(null);
+    onScanStart?.();
+
+    let finalAnalysis = analysis;
+    let parentScanId: number | null = null;
+
+    try {
+      // Phase 1: SAST & SCA
+      if (enabledScanners.sast || enabledScanners.sca) {
+        let phaseName = '';
+        if (enabledScanners.sast && enabledScanners.sca) phaseName = 'SAST & SCA';
+        else if (enabledScanners.sast) phaseName = 'SAST';
+        else phaseName = 'SCA';
+
+        setCurrentPhase(phaseName);
+        if (enabledScanners.sast) onScanStatusChange?.('sast', true);
+        if (enabledScanners.sca) onScanStatusChange?.('sca', true);
+
+        try {
+          const result = await autoScan(
+            repoFullName,
+            cloneUrl,
+            repoName,
+            repoOwner,
+            customToken,
+            enabledScanners.sca,
+            enabledScanners.sast
+          );
+
+          if (result && (result as any).scan_results && (result as any).scan_results.length > 0) {
+            parentScanId = (result as any).scan_results[0].scan_id;
+          }
+
+          finalAnalysis = {
+            ...finalAnalysis,
+            ...result,
+            analysis: (result as any).analysis || finalAnalysis?.analysis,
+          };
+
+          setAnalysis(finalAnalysis);
+          onAnalysisComplete?.(result);
+          onScanStatusChange?.('sast', false);
+          onScanStatusChange?.('sca', false);
+        } catch (err: any) {
+          console.error('SAST/SCA phase failed:', err);
+          setLocalError(`SAST/SCA Failed: ${err.message || 'Unknown error'}`);
+          onScanStatusChange?.('sast', false);
+          onScanStatusChange?.('sca', false);
+          // On continue si possible pour le DAST
+        }
+
+      }
+
+      // Phase 2: DAST (Automated Build & Scan)
+      if (enabledScanners.dast) {
+        setCurrentPhase('DAST');
+        onScanStatusChange?.('dast', true);
+        try {
+          const res = await api.post(endpoints.scanner.dastAutoScan, {
+            clone_url: cloneUrl,
+            repo_full_name: repoFullName,
+            repo_owner: repoOwner,
+            repo_name: repoName,
+            custom_token: customToken,
+            parent_scan_id: parentScanId
+          });
+
+          // Combine DAST results with previous ones
+          finalAnalysis = {
+            ...finalAnalysis,
+            scan_results: [
+              ...(finalAnalysis?.scan_results || []),
+              {
+                scanner: 'zap',
+                status: 'COMPLETED',
+                metrics: res.data.metrics,
+                scan_id: res.data.scan_id
+              }
+            ]
+          };
+
+          setAnalysis(finalAnalysis);
+          onAnalysisComplete?.(res.data);
+          onScanStatusChange?.('dast', false);
+        } catch (err: any) {
+          console.error('DAST phase failed:', err);
+          setLocalError(prev => prev ? `${prev} | DAST Failed` : 'DAST Failed');
+          onScanStatusChange?.('dast', false);
+        }
+
+      }
+
+      setShowDetails(true);
+    } catch (err) {
+      console.error('Auto-scan execution error:', err);
+    } finally {
+      setScanning(false);
+      setCurrentPhase(null);
+    }
+  };
+
+  const toggleAll = (val: boolean) => {
+    setEnabledScanners({
+      sast: val,
+      sca: val,
+      dast: val
+    });
+  };
+
+  const isAnyEnabled = enabledScanners.sast || enabledScanners.sca || enabledScanners.dast;
+  const isAllEnabled = enabledScanners.sast && enabledScanners.sca && enabledScanners.dast;
+
+
+  if (!selectedScanner) {
+    return (
+      <div className={`auto-scanner-simplified loading ${className}`}>
+        <div className="loading-spinner">
+          <span className="spinner"></span>
+          <p>Detecting best scanner...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const scannerInfo = SCANNER_INFO[selectedScanner] || {
+    name: selectedScanner.toUpperCase(),
+    icon: '🔧',
+    color: '#666',
+    description: 'Security Scanner'
+  };
+
+  return (
+    <div className={`auto-scanner-simplified ${className}`}>
+      {/* Show analysis details at the top */}
+      {analysis && (
+        <div className="analysis-info" style={{ marginBottom: '16px' }}>
+          <button
+            className="info-toggle"
+            onClick={() => setShowDetails(!showDetails)}
+          >
+            {showDetails ? '▼' : '▶'} Détails de code
+          </button>
+
+          {showDetails && (
+            <div className="analysis-details">
+              <div className="detail-row">
+                <span className="label">Langages détectés :</span>
+                <span className="value">
+                  {analysis.analysis?.languages?.join(', ') || 'N/A'}
+                </span>
+              </div>
+
+              {analysis.analysis?.frameworks &&
+                Object.keys(analysis.analysis.frameworks).length > 0 && (
+                  <div className="detail-row">
+                    <span className="label">Frameworks :</span>
+                    <span className="value">
+                      {Object.entries(analysis.analysis.frameworks)
+                        .map(([lang, fw]: [string, any]) => `${lang}: ${fw.join(', ')}`)
+                        .join(' | ')}
+                    </span>
+                  </div>
+                )}
+
+              <div className="detail-row">
+                <span className="label">Confiance :</span>
+                <div className="confidence-bar">
+                  <div
+                    className="confidence-fill"
+                    style={{
+                      width: `${(analysis.confidence || 0) * 100}%`,
+                      backgroundColor: scannerInfo.color
+                    }}
+                  ></div>
+                  <span className="confidence-text">
+                    {((analysis.confidence || 0) * 100).toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+
+              {analysis.reasoning && (
+                <div className="detail-row">
+                  <span className="label">Pourquoi ce scanner ? :</span>
+                  <p className="reasoning">{analysis.reasoning}</p>
+                </div>
+              )}
+
+
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Main Scanner Section */}
+      <div className="scanner-selection-area">
+        <div className="scanner-header">
+          <p className="auto-detected">🤖 Auto-Detected Scanner:</p>
+        </div>
+
+        {/* Scan Type Selection Area */}
+        <div style={{
+          background: 'rgba(255, 255, 255, 0.03)',
+          border: '1px solid var(--border)',
+          borderRadius: '10px',
+          padding: '12px',
+          marginBottom: '8px'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Scope de l'analyse
+            </span>
+            <button
+              onClick={() => toggleAll(!isAllEnabled)}
+              style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}
+            >
+              {isAllEnabled ? 'Désélectionner tout' : 'Tout sélectionner'}
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {[
+              { id: 'sast', label: 'SAST (Static Analysis)', icon: <Shield size={14} />, desc: `Analysis with ${scannerInfo.name}` },
+              { id: 'sca', label: 'SCA (Dependency Scan)', icon: <Box size={14} />, desc: 'Vulnerability detection in libs' },
+              { id: 'dast', label: 'DAST (Dynamic Analysis)', icon: <Globe size={14} />, desc: 'Real-time test (requires Docker)' },
+            ].map(type => (
+              <label
+                key={type.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '8px 10px',
+                  background: (enabledScanners as any)[type.id] ? 'rgba(99, 102, 241, 0.05)' : 'transparent',
+                  border: '1px solid',
+                  borderColor: (enabledScanners as any)[type.id] ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={(enabledScanners as any)[type.id]}
+                  onChange={() => setEnabledScanners(prev => ({ ...prev, [type.id]: !(prev as any)[type.id] }))}
+                  style={{ cursor: 'pointer' }}
+                />
+                <div style={{ color: (enabledScanners as any)[type.id] ? 'var(--primary)' : 'var(--text-dim)' }}>
+                  {type.icon}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: (enabledScanners as any)[type.id] ? 'white' : 'var(--text-dim)' }}>
+                    {type.label}
+                  </span>
+                  <span style={{ fontSize: '10px', color: 'var(--text-dim)', opacity: 0.7 }}>
+                    {type.desc}
+                  </span>
+                </div>
+                {(enabledScanners as any)[type.id] && <Check size={14} color="var(--primary)" style={{ marginLeft: 'auto' }} />}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Action Button */}
+        <button
+          className="scanner-button main-button"
+          onClick={() => handleLaunchScan()}
+          disabled={loading || scanning || !isAnyEnabled}
+          style={{
+            borderColor: isAnyEnabled ? (scanning ? 'var(--border)' : scannerInfo.color) : 'var(--border)',
+            background: isAnyEnabled ? 'white' : 'rgba(255,255,255,0.02)',
+            opacity: isAnyEnabled ? 1 : 0.5
+          }}
+        >
+          <div style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '8px',
+            background: isAnyEnabled ? (scanning ? 'rgba(0,0,0,0.05)' : `${scannerInfo.color}15`) : 'transparent',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '20px'
+          }}>
+            {scanning ? <Loader2 className="animate-spin" size={20} color="var(--primary)" /> : scannerInfo.icon}
+          </div>
+          <div className="scanner-text">
+            <span className="scanner-name" style={{ color: isAnyEnabled ? '#333' : 'var(--text-dim)' }}>
+              {scanning ? 'Analyse en cours...' : `Lancer l'analyse (${Object.values(enabledScanners).filter(Boolean).length})`}
+            </span>
+            <span className="scanner-desc">
+              {scanning ? (currentPhase ? `Analyse ${currentPhase} en cours...` : 'Analyse en cours...') : 'Exécuter le scope sélectionné'}
+            </span>
+          </div>
+        </button>
+
+        {(loading || scanning || scaScanning) && (
+          <p className="progress-text">
+            {scaScanning ? 'Running SCA analysis...' : progress || 'Processing...'}
+          </p>
+        )}
+
+        {(error || localError) && (
+          <div className="error-alert">
+            ❌ Error: {localError || error}
+          </div>
+        )}
+
+      </div>
+
+      <style>{`
+        .auto-scanner-simplified {
+          width: 100%;
+          max-width: 600px;
+        }
+        
+        .auto-scanner-simplified.loading {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          min-height: 120px;
+        }
+        
+        .loading-spinner {
+          text-align: center;
+        }
+        
+        .spinner {
+          display: inline-block;
+          width: 20px;
+          height: 20px;
+          border: 3px solid rgba(102, 126, 234, 0.3);
+          border-top-color: #667eea;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+          margin-bottom: 10px;
+        }
+        
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        
+        .scanner-selection-area {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        
+        .scanner-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .auto-detected {
+          margin: 0;
+          font-size: 13px;
+          font-weight: 600;
+          color: #666;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        
+        .scanner-button {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          width: 100%;
+          padding: 16px;
+          background: white;
+          border: 2px solid #ddd;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          font-family: inherit;
+          text-align: left;
+        }
+        
+        .scanner-button.main-button {
+          border-width: 2px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .scanner-button:not(:disabled):hover {
+          border-color: currentColor;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+          transform: translateY(-2px);
+        }
+        
+        .scanner-button:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+        }
+        
+        .scanner-button .spinner {
+          width: 16px;
+          height: 16px;
+          margin-left: auto;
+        }
+        
+        .scanner-icon {
+          font-size: 28px;
+          min-width: 40px;
+          text-align: center;
+        }
+        
+        .scanner-text {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        
+        .scanner-name {
+          font-size: 16px;
+          font-weight: 600;
+          color: #333;
+        }
+        
+        .scanner-desc {
+          font-size: 12px;
+          color: #999;
+        }
+        
+        .progress-text {
+          margin: 0;
+          font-size: 12px;
+          color: #667eea;
+          font-weight: 500;
+          text-align: center;
+        }
+        
+        .error-alert {
+          padding: 10px 12px;
+          background-color: #ffebee;
+          border: 1px solid #ffcdd2;
+          border-radius: 4px;
+          color: #c62828;
+          font-size: 13px;
+        }
+        
+        .analysis-info {
+          margin-top: 8px;
+        }
+        
+        .info-toggle {
+          width: 100%;
+          padding: 10px;
+          background-color: #f5f5f5;
+          border: 1px solid #e0e0e0;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 13px;
+          font-weight: 600;
+          color: #666;
+          transition: all 0.2s ease;
+        }
+        
+        .info-toggle:hover {
+          background-color: #eeeeee;
+        }
+        
+        .analysis-details {
+          margin-top: 8px;
+          padding: 12px;
+          background-color: #fafafa;
+          border: 1px solid #e0e0e0;
+          border-radius: 4px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        
+        .detail-row {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        
+        .label {
+          font-size: 12px;
+          font-weight: 600;
+          color: #666;
+          text-transform: uppercase;
+          letter-spacing: 0.3px;
+        }
+        
+        .value {
+          font-size: 13px;
+          color: #333;
+        }
+        
+        .confidence-bar {
+          position: relative;
+          width: 100%;
+          height: 24px;
+          background-color: #e0e0e0;
+          border-radius: 4px;
+          overflow: hidden;
+        }
+        
+        .confidence-fill {
+          height: 100%;
+          transition: width 0.3s ease;
+        }
+        
+        .confidence-text {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: 12px;
+          font-weight: 600;
+          color: white;
+          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        }
+        
+        .reasoning {
+          margin: 0;
+          font-size: 12px;
+          color: #555;
+          font-style: italic;
+          background-color: white;
+          padding: 8px;
+          border-radius: 3px;
+          border-left: 3px solid #667eea;
+        }
+        
+
+      `}</style>
+    </div>
+  );
+}
+
+export default AutoScannerSimplified;
