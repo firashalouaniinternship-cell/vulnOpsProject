@@ -20,7 +20,8 @@ from scanners.sast.psalm_runner import run_full_psalm_scan
 from scanners.sast.brakeman_runner import run_full_brakeman_scan
 from scanners.sast.clippy_runner import run_full_clippy_scan
 from scanners.sast.detekt_runner import run_full_detekt_scan
-from scanners.sca.trivy_runner import run_trivy, parse_trivy_results
+from scanners.sca.dependency_check_runner import run_dependency_check, parse_dependency_check_results
+from scanners.container.trivy_runner import run_trivy, parse_trivy_results
 from rag.llm_scoring import get_direct_llm_score
 from integrations.defectdojo.mapper import DojoMapper
 
@@ -95,7 +96,9 @@ def auto_trigger_scan(request):
     repo_name = request.data.get('repo_name', '')
     repo_owner = request.data.get('repo_owner', '')
     run_sca = request.data.get('run_sca', False)
+    run_container = request.data.get('run_container', False)
     run_sast = request.data.get('run_sast', True)
+    targets = request.data.get('targets', [])
     
     if not clone_url or not repo_full_name:
         return Response(
@@ -163,6 +166,8 @@ def auto_trigger_scan(request):
                 run_sast=run_sast,
                 run_sca=run_sca,
                 sca_status='PENDING' if run_sca else 'FAILED',
+                run_container=run_container,
+                container_status='PENDING' if run_container else 'FAILED',
             )
 
             current_repo_path = repo_path
@@ -170,9 +175,11 @@ def auto_trigger_scan(request):
             try:
                 if run_sast:
                     if scanner_type == 'bandit':
-                        result = scanner_functions[scanner_type](clone_url, access_token, repo_path=current_repo_path)
+                        result = scanner_functions[scanner_type](clone_url, access_token, repo_path=current_repo_path, targets=targets)
                     elif scanner_type == 'semgrep':
-                        result = scanner_functions[scanner_type](clone_url, access_token, repo_owner, repo_name, repo_path=current_repo_path)
+                        result = scanner_functions[scanner_type](clone_url, access_token, repo_owner, repo_name, repo_path=current_repo_path, targets=targets)
+                    elif scanner_type == 'eslint':
+                        result = scanner_functions[scanner_type](clone_url, access_token, repo_owner, repo_name, targets=targets)
                     else:
                         result = scanner_functions[scanner_type](clone_url, access_token, repo_owner, repo_name)
                 else:
@@ -184,17 +191,44 @@ def auto_trigger_scan(request):
                         scan.sca_status = 'RUNNING'
                         scan.save()
                         
-                        trivy_result = run_trivy(repo_path)
-                        if trivy_result['success']:
-                            sca_vulnerabilities = parse_trivy_results(trivy_result['data'], repo_path)
+                        dc_result = run_dependency_check(repo_path, targets=targets)
+                        if dc_result['success']:
+                            sca_vulnerabilities = parse_dependency_check_results(dc_result['data'], repo_path)
                             scan.sca_status = 'COMPLETED'
                             scan.sca_high_count = sum(1 for v in sca_vulnerabilities if v.get('severity') == 'HIGH')
                             scan.sca_medium_count = sum(1 for v in sca_vulnerabilities if v.get('severity') == 'MEDIUM')
                             scan.sca_low_count = sum(1 for v in sca_vulnerabilities if v.get('severity') == 'LOW')
                         else:
                             scan.sca_status = 'FAILED'
-                    except Exception:
+                    except Exception as e:
+                        logger.error(f"SCA (Dependency-Check) failed: {e}")
                         scan.sca_status = 'FAILED'
+                    scan.save()
+
+                container_vulnerabilities = []
+                if run_container and result['success']:
+                    try:
+                        scan.container_status = 'RUNNING'
+                        scan.save()
+                        
+                        trivy_result = run_trivy(repo_path, targets=targets)
+                        if trivy_result['success']:
+                            container_vulnerabilities = parse_trivy_results(trivy_result['data'], repo_path)
+                            # Marquer comme container au lieu de SCA
+                            for v in container_vulnerabilities:
+                                v['is_sca'] = False
+                                v['is_container'] = True
+                            
+                            scan.container_status = 'COMPLETED'
+                            scan.container_critical_count = sum(1 for v in container_vulnerabilities if v.get('severity') == 'CRITICAL')
+                            scan.container_high_count = sum(1 for v in container_vulnerabilities if v.get('severity') == 'HIGH')
+                            scan.container_medium_count = sum(1 for v in container_vulnerabilities if v.get('severity') == 'MEDIUM')
+                            scan.container_low_count = sum(1 for v in container_vulnerabilities if v.get('severity') == 'LOW')
+                        else:
+                            scan.container_status = 'FAILED'
+                    except Exception as e:
+                        logger.error(f"Container scan (Trivy) failed: {e}")
+                        scan.container_status = 'FAILED'
                     scan.save()
                 
                 if not result['success']:
@@ -212,7 +246,7 @@ def auto_trigger_scan(request):
                     })
                 else:
                     vulnerabilities_data = result['vulnerabilities']
-                    all_vulns = vulnerabilities_data + sca_vulnerabilities
+                    all_vulns = vulnerabilities_data + sca_vulnerabilities + container_vulnerabilities
                     total_issues = len(all_vulns)
                     
                     scan.status = 'COMPLETED'
@@ -292,7 +326,44 @@ def auto_trigger_scan(request):
                             more_info=v.get('more_info', ''),
                             llm_score=llm_fb_score,
                             llm_explanation=llm_fb_reasoning,
-                            is_sca=True
+                            is_sca=True,
+                            is_container=False
+                        ))
+
+                    for v in container_vulnerabilities:
+                        # Scoring IA pour Container Scanning
+                        try:
+                            ai_res = get_direct_llm_score(
+                                test_name=v['test_name'],
+                                issue_text=v['issue_text'],
+                                severity=v['severity'],
+                                context_summary=context_summary,
+                                code_snippet=v.get('code_snippet', '')
+                            )
+                            llm_fb_score = ai_res.get('score', 0.5)
+                            llm_fb_reasoning = ai_res.get('reasoning', 'Analyse Container IA réussie')
+                        except Exception as e:
+                            logger.warning(f"AI Scoring failed for Container {v['test_id']}: {e}")
+                            llm_fb_score = 0.5
+                            llm_fb_reasoning = f'Erreur technique IA (Container): {str(e)}'
+
+                        vuln_objects.append(Vulnerability(
+                            scan=scan,
+                            test_id=v['test_id'],
+                            test_name=v['test_name'],
+                            issue_text=v['issue_text'],
+                            severity=v['severity'],
+                            confidence=v['confidence'],
+                            filename=v.get('filename', ''),
+                            line_number=v.get('line_number', 0),
+                            line_range=v.get('line_range', []),
+                            code_snippet=v.get('code_snippet', ''),
+                            cwe=v.get('cwe', ''),
+                            more_info=v.get('more_info', ''),
+                            llm_score=llm_fb_score,
+                            llm_explanation=llm_fb_reasoning,
+                            is_sca=False,
+                            is_container=True
                         ))
                     
                     Vulnerability.objects.bulk_create(vuln_objects)
@@ -302,10 +373,16 @@ def auto_trigger_scan(request):
                         'data': result.get('raw_output'),
                         'apps.scans': scanner_type
                     })
-                    if run_sca and 'trivy_result' in locals() and trivy_result.get('success'):
+                    if run_sca and 'dc_result' in locals() and dc_result.get('success'):
                         dojo_uploads.append({
                             'type': 'sca',
-                            'data': trivy_result['data'],
+                            'data': json.dumps(dc_result['data']),
+                            'apps.scans': 'dependency-check'
+                        })
+                    if run_container and 'trivy_result' in locals() and trivy_result.get('success'):
+                        dojo_uploads.append({
+                            'type': 'container',
+                            'data': json.dumps(trivy_result['data']),
                             'apps.scans': 'trivy'
                         })
 

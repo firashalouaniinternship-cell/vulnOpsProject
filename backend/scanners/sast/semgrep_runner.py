@@ -6,11 +6,22 @@ import tempfile
 from core.utils.repo_utils import clone_repo
 
 
-def run_semgrep(repo_path: str) -> dict:
+def run_semgrep(repo_path: str, targets: list = None) -> dict:
     """
-    Exécute Semgrep sur un répertoire et retourne les résultats JSON.
+    Exécute Semgrep sur un répertoire ou des cibles spécifiques et retourne les résultats JSON.
     """
-    print(f"Exécution de Semgrep sur : {repo_path}")
+    print(f"Exécution de Semgrep sur : {repo_path} (targets: {targets})")
+    
+    # Prépare les cibles du scan
+    scan_targets = []
+    if targets:
+        for t in targets:
+            full_path = os.path.join(repo_path, t)
+            if os.path.exists(full_path):
+                scan_targets.append(full_path)
+    
+    if not scan_targets:
+        scan_targets = [repo_path] # Fallback sur le repo complet
     
     # Vérifie si semgrep est installé
     try:
@@ -26,8 +37,7 @@ def run_semgrep(repo_path: str) -> dict:
                 'scan',
                 '--json',
                 '--config=p/owasp-top-ten',
-                repo_path,
-            ],
+            ] + scan_targets,
             capture_output=True,
             text=True,
             timeout=600  # 10 minutes max
@@ -99,7 +109,7 @@ def parse_semgrep_results(semgrep_output: dict, repo_path: str) -> list:
     return vulnerabilities
 
 
-def run_full_semgrep_scan(clone_url: str, access_token: str, repo_owner: str, repo_name: str, repo_path: str = None) -> dict:
+def run_full_semgrep_scan(clone_url: str, access_token: str, repo_owner: str, repo_name: str, repo_path: str = None, targets: list = None) -> dict:
     """
     Lance un scan complet Semgrep pour un projet:
     1. Clone le dépôt (si repo_path est None)
@@ -120,7 +130,7 @@ def run_full_semgrep_scan(clone_url: str, access_token: str, repo_owner: str, re
         
         # 2. Semgrep execution
         print("2. Analyse avec Semgrep...")
-        semgrep_result = run_semgrep(repo_path)
+        semgrep_result = run_semgrep(repo_path, targets=targets)
         
         # Check for errors
         if 'errors' in semgrep_result:

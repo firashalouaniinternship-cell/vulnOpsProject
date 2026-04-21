@@ -1,7 +1,8 @@
 import logging
 from typing import List, Dict
 from scanners.sast.bandit_runner import BanditRunner
-from scanners.sca.trivy_runner import TrivyRunner
+from scanners.container.trivy_runner import TrivyRunner
+from scanners.sca.dependency_check_runner import DependencyCheckRunner
 from scanners.dast.zaproxy_runner import ZapRunner
 # Import other runners as they are converted...
 
@@ -18,6 +19,7 @@ class OrchestratorService:
         # Mapping simple pour lexemple -  affiner avec une registry
         runner_map = {
             'bandit': BanditRunner,
+            'dependency-check': DependencyCheckRunner,
             'trivy': TrivyRunner,
             'zap': ZapRunner,
         }

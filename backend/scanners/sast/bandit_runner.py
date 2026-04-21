@@ -6,11 +6,22 @@ import tempfile
 import git
 from django.conf import settings
 from core.utils.repo_utils import clone_repo
-def run_bandit(repo_path: str) -> dict:
+def run_bandit(repo_path: str, targets: list = None) -> dict:
     """
-    Exécute Bandit sur un répertoire et retourne les résultats JSON.
+    Exécute Bandit sur un répertoire ou des cibles spécifiques et retourne les résultats JSON.
     """
-    print(f"Exécution de Bandit sur : {repo_path}")
+    print(f"Exécution de Bandit sur : {repo_path} (targets: {targets})")
+    
+    # Prépare les cibles du scan
+    scan_targets = []
+    if targets:
+        for t in targets:
+            full_path = os.path.join(repo_path, t)
+            if os.path.exists(full_path):
+                scan_targets.append(full_path)
+    
+    if not scan_targets:
+        scan_targets = [repo_path] # Fallback sur le repo complet if nothing valid selected
     
     # Vérifie si bandit est installé
     try:
@@ -21,11 +32,11 @@ def run_bandit(repo_path: str) -> dict:
     result = subprocess.run(
         [
             'bandit',
-            '-r', repo_path,           # récursif
-            '-f', 'json',              # format JSON
-            '-ll',                     # niveau minimum LOW
-            '--exit-zero',             # ne pas échouer même si des issues trouvées
-        ],
+            '-r',              # récursif
+            '-f', 'json',      # format JSON
+            '-ll',             # niveau minimum LOW
+            '--exit-zero',     # ne pas échouer même si des issues trouvées
+        ] + scan_targets,
         capture_output=True,
         text=True,
         timeout=300  # 5 minutes max pour les gros repos
@@ -105,13 +116,14 @@ class BanditRunner(BaseScanner):
 
     def run(self, target_path_or_url, **kwargs):
         access_token = kwargs.get('access_token')
+        targets = kwargs.get('targets', [])
         # On utilise la fonction existante run_full_scan pour conserver la logique
-        result = run_full_scan(target_path_or_url, access_token)
+        result = run_full_scan(target_path_or_url, access_token, targets=targets)
         if result['success']:
             return result['vulnerabilities']
         return []
 
-def run_full_scan(clone_url: str, access_token: str, repo_path: str = None) -> dict:
+def run_full_scan(clone_url: str, access_token: str, repo_path: str = None, targets: list = None) -> dict:
     """
     Lance un scan complet :
     1. Clone le dépôt (si repo_path est None)
@@ -130,7 +142,7 @@ def run_full_scan(clone_url: str, access_token: str, repo_path: str = None) -> d
             clone_repo(clone_url, access_token, repo_path)
 
         # Scan
-        bandit_output = run_bandit(repo_path)
+        bandit_output = run_bandit(repo_path, targets=targets)
 
         # Parse
         vulnerabilities = parse_bandit_results(bandit_output, repo_path)

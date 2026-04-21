@@ -12,18 +12,29 @@ class TrivyRunner(BaseScanner):
         super().__init__("Trivy")
     
     def run(self, target_path_or_url, **kwargs):
-        result = run_trivy(target_path_or_url)
+        targets = kwargs.get('targets', [])
+        result = run_trivy(target_path_or_url, targets=targets)
         if result['success']:
             return parse_trivy_results(result['data'], target_path_or_url)
         return []
 
-def run_trivy(repo_path: str) -> dict:
+def run_trivy(repo_path: str, targets: list = None) -> dict:
     """
-    Exécute Trivy sur un répertoire et retourne les résultats JSON bruts.
-    Fonctionne via Docker sur Windows avec gestion correcte des chemins.
+    Exécute Trivy sur un répertoire ou des cibles spécifiques et retourne les résultats JSON bruts.
     """
     if not repo_path or not os.path.exists(repo_path):
         return {'success': False, 'error': f"Chemin invalide : {repo_path}"}
+
+    # Prépare les cibles du scan
+    scan_targets = []
+    if targets:
+        for t in targets:
+            full_path = os.path.join(repo_path, t)
+            if os.path.exists(full_path):
+                scan_targets.append(full_path)
+    
+    if not scan_targets:
+        scan_targets = [os.path.abspath(repo_path)]
 
     try:
         abs_repo_path = os.path.abspath(repo_path)
@@ -34,40 +45,41 @@ def run_trivy(repo_path: str) -> dict:
         
         logger.info(f"Running Trivy via Docker on: {abs_repo_path}")
         
-        result = subprocess.run(
-            [
+        # Scan chaque cible
+        all_results = []
+        for t in scan_targets:
+            # Calcul du chemin relatif pour le montage Docker
+            rel_path = os.path.relpath(t, abs_repo_path)
+            container_path = "/app" if rel_path == "." else f"/app/{rel_path.replace(os.sep, '/')}"
+            
+            cmd = [
                 'docker', 'run', '--rm',
                 '-v', f"{abs_repo_path}:/app:ro",
                 'aquasec/trivy', 'fs',
                 '--format', 'json',
                 '--quiet',
                 '--no-progress',
-                '/app'
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            encoding='utf-8',
-            errors='replace'
-        )
+                container_path
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                encoding='utf-8',
+                errors='replace'
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                try:
+                    data = json.loads(result.stdout)
+                    if 'Results' in data:
+                        all_results.extend(data['Results'])
+                except Exception as e:
+                    logger.error(f"Failed to parse Trivy JSON output for {t}: {e}")
         
-        logger.info(f"Trivy returncode: {result.returncode}")
-        
-        if result.returncode != 0:
-            logger.error(f"Trivy stderr: {result.stderr[:500]}")
-            return {'success': False, 'error': result.stderr or "Erreur inconnue Trivy"}
-        
-        if not result.stdout.strip():
-            logger.warning("Trivy returned empty output — no vulnerabilities found")
-            return {'success': True, 'data': {'Results': []}}
-        
-        try:
-            data = json.loads(result.stdout)
-            return {'success': True, 'data': data}
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Trivy JSON output: {e}")
-            logger.error(f"Raw output (first 500): {result.stdout[:500]}")
-            return {'success': False, 'error': f"Invalid JSON from Trivy: {str(e)}"}
+        return {'success': True, 'data': {'Results': all_results}}
         
     except subprocess.TimeoutExpired:
         logger.error("Trivy scan timed out after 300s")

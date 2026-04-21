@@ -17,6 +17,7 @@ export interface Vulnerability {
   llm_score?: number;
   llm_explanation?: string;
   is_sca?: boolean;
+  is_container?: boolean;
   is_dast?: boolean;
   solution?: string;
 }

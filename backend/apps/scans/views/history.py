@@ -16,7 +16,7 @@ def get_scan_history(request, owner, repo):
     ).values(
         'id', 'status', 'started_at', 'completed_at',
         'total_issues', 'critical_count', 'high_count', 'medium_count', 'low_count',
-        'scanner_type', 'error_message', 'run_sast', 'run_sca', 'run_dast'
+        'scanner_type', 'error_message', 'run_sast', 'run_sca', 'run_container', 'run_dast'
     )
     return Response(list(scans))
 
@@ -34,7 +34,7 @@ def get_scan_detail(request, scan_id):
         'id', 'test_id', 'test_name', 'issue_text',
         'severity', 'confidence', 'filename', 'line_number',
         'line_range', 'code_snippet', 'cwe', 'more_info',
-        'llm_score', 'llm_explanation', 'is_sca', 'is_dast', 'solution'
+        'llm_score', 'llm_explanation', 'is_sca', 'is_container', 'is_dast', 'solution'
     )
 
     return Response({
@@ -47,6 +47,8 @@ def get_scan_detail(request, scan_id):
         'run_sast': scan.run_sast,
         'run_sca': scan.run_sca,
         'sca_status': scan.sca_status,
+        'run_container': scan.run_container,
+        'container_status': scan.container_status,
         'run_dast': scan.run_dast,
         'dast_status': scan.dast_status,
         'metrics': {
@@ -59,6 +61,10 @@ def get_scan_detail(request, scan_id):
             'sca_high_count': scan.sca_high_count,
             'sca_medium_count': scan.sca_medium_count,
             'sca_low_count': scan.sca_low_count,
+            'container_critical_count': scan.container_critical_count,
+            'container_high_count': scan.container_high_count,
+            'container_medium_count': scan.container_medium_count,
+            'container_low_count': scan.container_low_count,
         },
         'vulnerabilities': list(vulns),
     })

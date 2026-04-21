@@ -6,6 +6,7 @@ import FileTree from '../components/FileTree';
 import ScanResults, { type Vulnerability } from '../components/ScanResults';
 import AutoScannerSimplified from '../components/AutoScannerSimplified';
 import DastPanel from '../components/DastPanel';
+import ConsolidatedView from '../components/ConsolidatedView';
 
 type ScannerType = 'bandit' | 'sonarcloud' | 'eslint' | 'semgrep' | 'cppcheck' | 'gosec' | 'psalm' | 'brakeman' | 'clippy' | 'detekt' | 'trivy' | 'zap';
 
@@ -23,15 +24,16 @@ const AnalysisPage: React.FC = () => {
   const [scanning, setScanning] = useState(false);
   const [scanResults, setScanResults] = useState<Vulnerability[]>([]);
   const [metrics, setMetrics] = useState<any>(null);
-  const [currentScanFeatures, setCurrentScanFeatures] = useState({ run_sast: true, run_sca: false, run_dast: false });
+  const [currentScanFeatures, setCurrentScanFeatures] = useState({ run_sast: true, run_sca: false, run_container: false, run_dast: false });
   const [history, setHistory] = useState<any[]>([]);
   const [selectedScanner, setSelectedScanner] = useState<ScannerType>('sonarcloud');
   const [showZeroModal, setShowZeroModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'sast' | 'sca' | 'dast' | 'report'>('sast');
+  const [activeTab, setActiveTab] = useState<'sast' | 'sca' | 'container' | 'dast' | 'report'>('sast');
   const [isSastScanning, setIsSastScanning] = useState(false);
   const [isScaScanning, setIsScaScanning] = useState(false);
   const [isDastScanning, setIsDastScanning] = useState(false);
   const [scanDate, setScanDate] = useState<string | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const hasResultsRef = useRef(false);
 
   const scannerName = selectedScanner === 'sonarcloud' ? 'SonarCloud' :
@@ -43,7 +45,7 @@ const AnalysisPage: React.FC = () => {
               selectedScanner === 'clippy' ? 'Clippy' :
                 selectedScanner === 'detekt' ? 'Detekt' :
                   selectedScanner === 'semgrep' ? 'Semgrep' :
-                    selectedScanner === 'trivy' ? 'Trivy (SCA)' :
+                    selectedScanner === 'trivy' ? 'Trivy (Container)' :
                       selectedScanner === 'zap' ? 'ZAP (DAST)' : 'Bandit';
 
   useEffect(() => {
@@ -110,6 +112,7 @@ const AnalysisPage: React.FC = () => {
         setCurrentScanFeatures({
           run_sast: response.data.run_sast !== false,
           run_sca: response.data.run_sca === true,
+          run_container: response.data.run_container === true,
           run_dast: response.data.run_dast === true
         });
       } else {
@@ -117,15 +120,18 @@ const AnalysisPage: React.FC = () => {
         setCurrentScanFeatures(prev => ({
           run_sast: prev.run_sast || response.data.run_sast !== false,
           run_sca: prev.run_sca || response.data.run_sca === true,
+          run_container: prev.run_container || response.data.run_container === true,
           run_dast: prev.run_dast || response.data.run_dast === true
         }));
       }
 
       // Changer d'onglet intelligemment
-      const { run_sast, run_sca, run_dast } = response.data;
-      if (scannerType === 'zap' || (run_dast && !run_sast && !run_sca)) {
+      const { run_sast, run_sca, run_container, run_dast } = response.data;
+      if (scannerType === 'zap' || (run_dast && !run_sast && !run_sca && !run_container)) {
         setActiveTab('dast');
-      } else if (scannerType === 'trivy' || (run_sca && !run_sast)) {
+      } else if (scannerType === 'trivy' || (run_container && !run_sast && !run_sca)) {
+        setActiveTab('container');
+      } else if (run_sca && !run_sast) {
         setActiveTab('sca');
       } else if (run_sast !== false) {
         setActiveTab('sast');
@@ -154,7 +160,7 @@ const AnalysisPage: React.FC = () => {
       case 'clippy': return 'Clippy';
       case 'detekt': return 'Detekt';
       case 'bandit': return 'Bandit';
-      case 'trivy': return 'Trivy (SCA)';
+      case 'trivy': return 'Trivy (Container)';
       case 'zap': return 'OWASP ZAP';
       default: return type;
     }
@@ -193,7 +199,11 @@ const AnalysisPage: React.FC = () => {
                 <Loader2 size={24} className="animate-spin" />
               </div>
             ) : (
-              <FileTree tree={tree} />
+              <FileTree 
+                tree={tree} 
+                selectedPaths={selectedPaths}
+                onSelectionChange={setSelectedPaths}
+              />
             )}
             <div className="panel-footer" style={{ padding: '16px', background: 'transparent' }}>
               <AutoScannerSimplified
@@ -203,6 +213,7 @@ const AnalysisPage: React.FC = () => {
                 repoOwner={owner || ''}
                 customToken={customToken}
                 repoLanguage={repoLanguage}
+                selectedPaths={Array.from(selectedPaths)}
                 onScanStart={() => {
                   setScanResults([]);
                   setMetrics(null);
@@ -214,6 +225,7 @@ const AnalysisPage: React.FC = () => {
                 onScanStatusChange={(type, isScanning) => {
                   if (type === 'sast') setIsSastScanning(isScanning);
                   else if (type === 'sca') setIsScaScanning(isScanning);
+                  else if (type === 'container') setIsScaScanning(isScanning); // On re-utilise isScaScanning ou on pourrait en créer un autre
                   else if (type === 'dast') setIsDastScanning(isScanning);
                 }}
                 onAnalysisComplete={async (data) => {
@@ -306,21 +318,33 @@ const AnalysisPage: React.FC = () => {
                   </div>
                 )}
                 {metrics && (
-                  <div className="flex gap-3">
-                    {(activeTab === 'sast' ? metrics.critical_count : metrics.sca_critical_count) > 0 && (
-                      <div className="flex items-center gap-1" style={{ fontSize: '12px', color: 'var(--critical)', fontWeight: 'bold' }}>
-                        <AlertTriangle size={14} /> {activeTab === 'sast' ? metrics.critical_count : metrics.sca_critical_count}
+                  <div className="flex gap-4">
+                    <div className="flex gap-2 items-center" style={{ borderRight: '1px solid var(--border)', paddingRight: '12px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)' }}>SAST:</span>
+                      <div className="flex gap-1.5">
+                        {metrics.critical_count > 0 && <span style={{ fontSize: '11px', color: 'var(--critical)', fontWeight: 'bold' }}>{metrics.critical_count}</span>}
+                        <span style={{ fontSize: '11px', color: 'var(--high)' }}>{metrics.high_count}</span>
+                        <span style={{ fontSize: '11px', color: 'var(--warning)' }}>{metrics.medium_count}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 items-center" style={{ borderRight: '1px solid var(--border)', paddingRight: '12px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)' }}>SCA:</span>
+                      <div className="flex gap-1.5">
+                        {metrics.sca_critical_count > 0 && <span style={{ fontSize: '11px', color: 'var(--critical)', fontWeight: 'bold' }}>{metrics.sca_critical_count}</span>}
+                        <span style={{ fontSize: '11px', color: 'var(--high)' }}>{metrics.sca_high_count}</span>
+                        <span style={{ fontSize: '11px', color: 'var(--warning)' }}>{metrics.sca_medium_count}</span>
+                      </div>
+                    </div>
+                    {(metrics.container_high_count > 0 || metrics.container_medium_count > 0) && (
+                      <div className="flex gap-2 items-center">
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)' }}>CONT:</span>
+                        <div className="flex gap-1.5">
+                          {metrics.container_critical_count > 0 && <span style={{ fontSize: '11px', color: 'var(--critical)', fontWeight: 'bold' }}>{metrics.container_critical_count}</span>}
+                          <span style={{ fontSize: '11px', color: 'var(--high)' }}>{metrics.container_high_count}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--warning)' }}>{metrics.container_medium_count}</span>
+                        </div>
                       </div>
                     )}
-                    <div className="flex items-center gap-1" style={{ fontSize: '12px', color: 'var(--high)' }}>
-                      <AlertTriangle size={14} /> {activeTab === 'sast' ? metrics.high_count : metrics.sca_high_count}
-                    </div>
-                    <div className="flex items-center gap-1" style={{ fontSize: '12px', color: 'var(--warning)' }}>
-                      <AlertTriangle size={14} /> {activeTab === 'sast' ? metrics.medium_count : metrics.sca_medium_count}
-                    </div>
-                    <div className="flex items-center gap-1" style={{ fontSize: '12px', color: 'var(--low)' }}>
-                      <Info size={14} /> {activeTab === 'sast' ? metrics.low_count : metrics.sca_low_count}
-                    </div>
                   </div>
                 )}
               </div>
@@ -366,7 +390,25 @@ const AnalysisPage: React.FC = () => {
                       transition: 'all 0.2s'
                     }}
                   >
-                    📦 SCA (Trivy)
+                    📦 SCA (Dependency-Check)
+                  </button>
+                )}
+                {currentScanFeatures.run_container && (
+                  <button
+                    onClick={() => setActiveTab('container')}
+                    style={{
+                      padding: '12px 20px',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: activeTab === 'container' ? '2px solid var(--primary)' : '2px solid transparent',
+                      color: activeTab === 'container' ? 'white' : 'var(--text-dim)',
+                      fontWeight: 600,
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    🐳 Container (Trivy)
                   </button>
                 )}
                 {currentScanFeatures.run_dast && (
@@ -434,38 +476,17 @@ const AnalysisPage: React.FC = () => {
                   }}
                 />
               ) : activeTab === 'report' ? (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                  <div style={{ padding: '16px', background: 'rgba(99, 102, 241, 0.05)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'white', marginBottom: '4px' }}>🛡️ Rapport de Sécurité Consolidé</h3>
-                      <p style={{ fontSize: '13px', color: 'var(--text-dim)' }}>Géré par DefectDojo • Vue unifiée : SAST + SCA + DAST.</p>
-                    </div>
-                    <a 
-                      href="http://localhost:8080" 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="btn-primary"
-                      style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', background: 'var(--primary)', color: 'white', borderRadius: '6px' }}
-                    >
-                      <ExternalLink size={16} />
-                      Ouvrir DefectDojo
-                    </a>
-                  </div>
-                  <iframe 
-                    src="http://localhost:8080" 
-                    style={{ flex: 1, border: 'none', background: 'white' }} 
-                    title="DefectDojo Dashboard"
-                  />
-                </div>
+                <ConsolidatedView vulnerabilities={scanResults} />
               ) : scanResults.length > 0 ? (
                 <ScanResults
                   vulnerabilities={scanResults.filter(v => {
-                    if (activeTab === 'sast') return v.is_sca !== true && v.is_dast !== true;
+                    if (activeTab === 'sast') return v.is_sca !== true && v.is_dast !== true && v.is_container !== true;
                     if (activeTab === 'sca') return v.is_sca === true;
+                    if (activeTab === 'container') return v.is_container === true;
                     if (activeTab === 'dast') return v.is_dast === true;
                     return false;
                   })}
-                  isScanning={activeTab === 'sast' ? isSastScanning : activeTab === 'sca' ? isScaScanning : false}
+                  isScanning={activeTab === 'sast' ? isSastScanning : (activeTab === 'sca' || activeTab === 'container') ? isScaScanning : false}
                 />
               ) : (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', textAlign: 'center', padding: '40px' }}>
@@ -531,7 +552,8 @@ const AnalysisPage: React.FC = () => {
                               <div style={{ color: 'var(--text-bright)', fontSize: '12px', opacity: 0.8 }}>
                                 {[
                                   scan.run_sast !== false && scan.scanner_type !== 'zap' && scan.scanner_type !== 'trivy' ? `${getScannerDisplayName(scan.scanner_type)} (SAST)` : null,
-                                  scan.run_sca || scan.scanner_type === 'trivy' ? 'Trivy (SCA)' : null,
+                                  scan.run_sca ? 'Dependency-Check' : null,
+                                  scan.run_container || scan.scanner_type === 'trivy' ? 'Trivy (Container)' : null,
                                   scan.run_dast || scan.scanner_type === 'zap' ? 'ZAP (DAST)' : null
                                 ].filter((item, pos, self) => Boolean(item) && self.indexOf(item) === pos).join(', ')}
                               </div>

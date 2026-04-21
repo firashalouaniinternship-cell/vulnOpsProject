@@ -41,6 +41,14 @@ class ScanResult(models.Model):
     sca_medium_count = models.IntegerField(default=0)
     sca_low_count = models.IntegerField(default=0)
 
+    # Container Scanning fields (Trivy)
+    run_container = models.BooleanField(default=False)
+    container_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    container_critical_count = models.IntegerField(default=0)
+    container_high_count = models.IntegerField(default=0)
+    container_medium_count = models.IntegerField(default=0)
+    container_low_count = models.IntegerField(default=0)
+
     # DAST fields (OWASP ZAP)
     run_dast = models.BooleanField(default=False)
     dast_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
@@ -87,6 +95,7 @@ class Vulnerability(models.Model):
     llm_score = models.FloatField(default=0.0)       # Score AI [0-1]
     llm_explanation = models.TextField(blank=True)   # Justification du score
     is_sca = models.BooleanField(default=False)
+    is_container = models.BooleanField(default=False)
     is_dast = models.BooleanField(default=False)
     solution = models.TextField(blank=True)
     more_info = models.URLField(max_length=1000, blank=True)          # Lien vers plus d'info

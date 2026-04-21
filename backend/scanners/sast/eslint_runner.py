@@ -6,11 +6,23 @@ import tempfile
 from core.utils.repo_utils import clone_repo
 
 
-def run_eslint(repo_path: str) -> dict:
+def run_eslint(repo_path: str, targets: list = None) -> dict:
     """
-    Exécute ESLint sur un répertoire et retourne les résultats JSON.
+    Exécute ESLint sur un répertoire ou des cibles spécifiques et retourne les résultats JSON.
     """
-    print(f"Exécution d'ESLint sur : {repo_path}")
+    print(f"Exécution d'ESLint sur : {repo_path} (targets: {targets})")
+    
+    # Prépare les cibles du scan
+    scan_targets = []
+    if targets:
+        for t in targets:
+            # Pour ESLint, les chemins doivent être relatifs au cwd (repo_path)
+            # ou on peut passer les chemins absolus si on est dans le bon cwd
+            if os.path.exists(os.path.join(repo_path, t)):
+                scan_targets.append(t)
+    
+    if not scan_targets:
+        scan_targets = ['.'] # Fallback sur tout le répertoire
     
     # Crée une config ESLint minimal si elle n'existe pas
     # Utilise .cjs pour garantir le support CommonJS même si le projet est en mode ESM
@@ -67,11 +79,11 @@ def run_eslint(repo_path: str) -> dict:
         return {'results': [], 'errors': "ESLint n'est pas installé. Installez avec: npm install -g eslint"}
 
     try:
-        # On exécute avec '.' comme cible
+        # On exécute avec les cibles choisies
         if isinstance(eslint_cmd, list):
-            cmd_args = eslint_cmd + ['.', '--format', 'json', '--no-warn-ignored']
+            cmd_args = eslint_cmd + scan_targets + ['--format', 'json', '--no-warn-ignored']
         else:
-            cmd_args = [eslint_cmd, '.', '--format', 'json', '--no-warn-ignored']
+            cmd_args = [eslint_cmd] + scan_targets + ['--format', 'json', '--no-warn-ignored']
             
         result = subprocess.run(
             cmd_args,
@@ -169,7 +181,7 @@ def parse_eslint_results(eslint_output, repo_path: str) -> list:
     return vulnerabilities
 
 
-def run_full_eslint_scan(clone_url: str, access_token: str, repo_owner: str, repo_name: str) -> dict:
+def run_full_eslint_scan(clone_url: str, access_token: str, repo_owner: str, repo_name: str, targets: list = None) -> dict:
     """
     Lance un scan complet ESLint pour un projet JS/TS:
     1. Clone le dépôt
@@ -186,7 +198,7 @@ def run_full_eslint_scan(clone_url: str, access_token: str, repo_owner: str, rep
         
         # 2. ESLint execution
         print("2. Analyse avec ESLint...")
-        eslint_result = run_eslint(tmp_dir)
+        eslint_result = run_eslint(tmp_dir, targets=targets)
         
         # Check for errors
         if 'errors' in eslint_result:

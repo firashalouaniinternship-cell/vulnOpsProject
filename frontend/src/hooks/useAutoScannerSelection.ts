@@ -62,7 +62,9 @@ interface UseAutoScannerSelectionReturn {
     repoOwner: string,
     customToken?: string,
     runSca?: boolean,
-    runSast?: boolean
+    runSast?: boolean,
+    runContainer?: boolean,
+    targets?: string[]
   ) => Promise<AutoScanResult>;
   
   analyzeProject: (projectPath: string) => Promise<AnalyzeResult>;
@@ -119,7 +121,9 @@ export function useAutoScannerSelection(): UseAutoScannerSelectionReturn {
     repoOwner: string,
     customToken?: string,
     runSca: boolean = false,
-    runSast: boolean = true
+    runSast: boolean = true,
+    runContainer: boolean = false,
+    targets: string[] = []
   ): Promise<AutoScanResult> => {
     setLoading(true);
     setError(null);
@@ -136,6 +140,8 @@ export function useAutoScannerSelection(): UseAutoScannerSelectionReturn {
           custom_token: customToken,
           run_sca: runSca,
           run_sast: runSast,
+          run_container: runContainer,
+          targets: targets,
         }
       );
       

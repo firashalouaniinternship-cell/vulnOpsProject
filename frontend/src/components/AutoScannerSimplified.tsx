@@ -17,10 +17,11 @@ interface AutoScannerSimplifiedProps {
   onScannerSelected?: (scanner: string) => void;
   onAnalysisComplete?: (data: any) => void;
   onScanStart?: () => void;
-  onScanStatusChange?: (type: 'sast' | 'sca' | 'dast', isScanning: boolean) => void;
+  onScanStatusChange?: (type: 'sast' | 'sca' | 'container' | 'dast', isScanning: boolean) => void;
   className?: string;
   customToken?: string;
   repoLanguage?: string;
+  selectedPaths?: string[];
 }
 
 interface ScannerInfo {
@@ -111,6 +112,7 @@ export function AutoScannerSimplified({
   className = '',
   customToken,
   repoLanguage,
+  selectedPaths = [],
 }: AutoScannerSimplifiedProps) {
   const { selectScanners, autoScan, loading, error, progress } = useAutoScannerSelection();
 
@@ -124,6 +126,7 @@ export function AutoScannerSimplified({
   const [enabledScanners, setEnabledScanners] = useState({
     sast: false,
     sca: false,
+    container: false,
     dast: false
   });
 
@@ -164,27 +167,32 @@ export function AutoScannerSimplified({
     let parentScanId: number | null = null;
 
     try {
-      // Phase 1: SAST & SCA
-      if (enabledScanners.sast || enabledScanners.sca) {
-        let phaseName = '';
-        if (enabledScanners.sast && enabledScanners.sca) phaseName = 'SAST & SCA';
-        else if (enabledScanners.sast) phaseName = 'SAST';
-        else phaseName = 'SCA';
+    // Phase 1: SAST, SCA & Container
+    if (enabledScanners.sast || enabledScanners.sca || enabledScanners.container) {
+      let phaseNames = [];
+      if (enabledScanners.sast) phaseNames.push('SAST');
+      if (enabledScanners.sca) phaseNames.push('SCA');
+      if (enabledScanners.container) phaseNames.push('Container');
 
-        setCurrentPhase(phaseName);
-        if (enabledScanners.sast) onScanStatusChange?.('sast', true);
-        if (enabledScanners.sca) onScanStatusChange?.('sca', true);
+      const phaseName = phaseNames.join(' & ');
+      setCurrentPhase(phaseName);
+      
+      if (enabledScanners.sast) onScanStatusChange?.('sast', true);
+      if (enabledScanners.sca) onScanStatusChange?.('sca', true);
+      if (enabledScanners.container) onScanStatusChange?.('container', true);
 
-        try {
-          const result = await autoScan(
-            repoFullName,
-            cloneUrl,
-            repoName,
-            repoOwner,
-            customToken,
-            enabledScanners.sca,
-            enabledScanners.sast
-          );
+      try {
+        const result = await autoScan(
+          repoFullName,
+          cloneUrl,
+          repoName,
+          repoOwner,
+          customToken,
+          enabledScanners.sca,
+          enabledScanners.sast,
+          enabledScanners.container,
+          selectedPaths
+        );
 
           if (result && (result as any).scan_results && (result as any).scan_results.length > 0) {
             parentScanId = (result as any).scan_results[0].scan_id;
@@ -198,13 +206,15 @@ export function AutoScannerSimplified({
 
           setAnalysis(finalAnalysis);
           onAnalysisComplete?.(result);
-          onScanStatusChange?.('sast', false);
-          onScanStatusChange?.('sca', false);
+          if (enabledScanners.sast) onScanStatusChange?.('sast', false);
+          if (enabledScanners.sca) onScanStatusChange?.('sca', false);
+          if (enabledScanners.container) onScanStatusChange?.('container', false);
         } catch (err: any) {
-          console.error('SAST/SCA phase failed:', err);
-          setLocalError(`SAST/SCA Failed: ${err.message || 'Unknown error'}`);
-          onScanStatusChange?.('sast', false);
-          onScanStatusChange?.('sca', false);
+          console.error('SAST/SCA/Container phase failed:', err);
+          setLocalError(`Scan Phase Failed: ${err.message || 'Unknown error'}`);
+          if (enabledScanners.sast) onScanStatusChange?.('sast', false);
+          if (enabledScanners.sca) onScanStatusChange?.('sca', false);
+          if (enabledScanners.container) onScanStatusChange?.('container', false);
           // On continue si possible pour le DAST
         }
 
@@ -262,12 +272,13 @@ export function AutoScannerSimplified({
     setEnabledScanners({
       sast: val,
       sca: val,
+      container: val,
       dast: val
     });
   };
 
-  const isAnyEnabled = enabledScanners.sast || enabledScanners.sca || enabledScanners.dast;
-  const isAllEnabled = enabledScanners.sast && enabledScanners.sca && enabledScanners.dast;
+  const isAnyEnabled = enabledScanners.sast || enabledScanners.sca || enabledScanners.container || enabledScanners.dast;
+  const isAllEnabled = enabledScanners.sast && enabledScanners.sca && enabledScanners.container && enabledScanners.dast;
 
 
   if (!selectedScanner) {
@@ -379,7 +390,8 @@ export function AutoScannerSimplified({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {[
               { id: 'sast', label: 'SAST (Static Analysis)', icon: <Shield size={14} />, desc: `Analysis with ${scannerInfo.name}` },
-              { id: 'sca', label: 'SCA (Dependency Scan)', icon: <Box size={14} />, desc: 'Vulnerability detection in libs' },
+              { id: 'sca', label: 'SCA (Dependency Scan)', icon: <Box size={14} />, desc: 'Detect libs with Dependency-Check' },
+              { id: 'container', label: 'Container Scanning', icon: <Shield size={14} />, desc: 'Scan with Trivy' },
               { id: 'dast', label: 'DAST (Dynamic Analysis)', icon: <Globe size={14} />, desc: 'Real-time test (requires Docker)' },
             ].map(type => (
               <label
@@ -444,12 +456,13 @@ export function AutoScannerSimplified({
             {scanning ? <Loader2 className="animate-spin" size={20} color="var(--primary)" /> : scannerInfo.icon}
           </div>
           <div className="scanner-text">
-            <span className="scanner-name" style={{ color: isAnyEnabled ? '#333' : 'var(--text-dim)' }}>
-              {scanning ? 'Analyse en cours...' : `Lancer l'analyse (${Object.values(enabledScanners).filter(Boolean).length})`}
-            </span>
-            <span className="scanner-desc">
-              {scanning ? (currentPhase ? `Analyse ${currentPhase} en cours...` : 'Analyse en cours...') : 'Exécuter le scope sélectionné'}
-            </span>
+             <span className="scanner-name" style={{ color: isAnyEnabled ? '#333' : 'var(--text-dim)' }}>
+               {scanning ? 'Analyse en cours...' : `Lancer l'analyse ${selectedPaths.length > 0 ? `(${selectedPaths.length} cibles)` : ''}`}
+             </span>
+             <span className="scanner-desc">
+               {scanning ? (currentPhase ? `Analyse ${currentPhase} en cours...` : 'Analyse en cours...') : 
+                selectedPaths.length > 0 ? `Scanner uniquement les ${selectedPaths.length} éléments sélectionnés` : 'Exécuter le scope sélectionné sur tout le projet'}
+             </span>
           </div>
         </button>
 
