@@ -22,6 +22,7 @@ interface AutoScannerSimplifiedProps {
   customToken?: string;
   repoLanguage?: string;
   selectedPaths?: string[];
+  branch?: string;
 }
 
 interface ScannerInfo {
@@ -113,6 +114,7 @@ export function AutoScannerSimplified({
   customToken,
   repoLanguage,
   selectedPaths = [],
+  branch,
 }: AutoScannerSimplifiedProps) {
   const { selectScanners, autoScan, loading, error, progress } = useAutoScannerSelection();
 
@@ -135,11 +137,11 @@ export function AutoScannerSimplified({
   // Auto-detect scanner on mount
   useEffect(() => {
     detectAndSelectScanner();
-  }, [repoFullName]);
+  }, [repoFullName, branch]);
 
   const detectAndSelectScanner = async () => {
     try {
-      const result = await selectScanners(repoFullName, cloneUrl, repoName, repoOwner, customToken);
+      const result = await selectScanners(repoFullName, cloneUrl, repoName, repoOwner, customToken, branch);
 
       if (result.success && result.suggested_scanners.length > 0) {
         // Take the first (best) scanner
@@ -191,7 +193,8 @@ export function AutoScannerSimplified({
           enabledScanners.sca,
           enabledScanners.sast,
           enabledScanners.container,
-          selectedPaths
+          selectedPaths,
+          branch
         );
 
           if (result && (result as any).scan_results && (result as any).scan_results.length > 0) {
@@ -231,6 +234,7 @@ export function AutoScannerSimplified({
             repo_owner: repoOwner,
             repo_name: repoName,
             custom_token: customToken,
+            branch: branch,
             parent_scan_id: parentScanId
           });
 

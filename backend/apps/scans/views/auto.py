@@ -38,6 +38,7 @@ def auto_select_scanners(request):
     repo_full_name = request.data.get('repo_full_name', '')
     repo_name = request.data.get('repo_name', '')
     repo_owner = request.data.get('repo_owner', '')
+    branch = request.data.get('branch')
     
     if not clone_url or not repo_full_name:
         return Response(
@@ -59,7 +60,8 @@ def auto_select_scanners(request):
             clone_url=clone_url,
             github_token=access_token,
             repo_owner=repo_owner,
-            repo_name=repo_name
+            repo_name=repo_name,
+            branch=branch
         )
         
         if not result['success']:
@@ -99,6 +101,7 @@ def auto_trigger_scan(request):
     run_container = request.data.get('run_container', False)
     run_sast = request.data.get('run_sast', True)
     targets = request.data.get('targets', [])
+    branch = request.data.get('branch')
     
     if not clone_url or not repo_full_name:
         return Response(
@@ -123,6 +126,7 @@ def auto_trigger_scan(request):
             github_token=access_token,
             repo_owner=repo_owner,
             repo_name=repo_name,
+            branch=branch,
             cleanup=False
         )
         

@@ -1,0 +1,140 @@
+name: VulnOps Main CI/CD
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # --- JOB FRONTEND : Lint, Build, Test ---
+  frontend-check:
+    name: Frontend CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: './frontend/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./frontend
+
+      - name: Lint code
+        run: npm run lint
+        working-directory: ./frontend
+
+      - name: Build production bundle
+        run: npm run build
+        working-directory: ./frontend
+
+  # --- JOB BACKEND : Lint, Test ---
+  backend-check:
+    name: Backend CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: './backend/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install flake8 pytest
+        working-directory: ./backend
+
+      - name: Run Linting (flake8)
+        run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        working-directory: ./backend
+
+      - name: Run Tests
+        run: python manage.py test
+        working-directory: ./backend
+
+  # --- JOB SECURITY : SAST & SCA ---
+  security-scan:
+    name: Security Analysis
+    needs: [frontend-check, backend-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies for Reporting
+        run: pip install requests semgrep
+
+      - name: Run SAST (Semgrep)
+        run: semgrep scan --json --config=auto --output=semgrep-report.json
+        continue-on-error: true
+
+      - name: Run SCA (npm audit)
+        run: |
+          cd frontend
+          npm audit --json > ../sca-report.json || true
+        continue-on-error: true
+
+      - name: Send results to DevSecOps Platform
+        env:
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          python3 - <<EOF
+          import json, os, requests
+          
+          def load_json(path):
+              if os.path.exists(path):
+                  try:
+                      with open(path) as f:
+                          return json.load(f)
+                  except:
+                      return {}
+              return {}
+
+          sast_data = load_json('semgrep-report.json')
+          sca_data = load_json('sca-report.json')
+
+          payload = {
+              "repo_full_name": os.environ.get('GITHUB_REPOSITORY'),
+              "repo_name": os.environ.get('GITHUB_REPOSITORY').split('/')[-1],
+              "branch": os.environ.get('GITHUB_REF_NAME'),
+              "commit_sha": os.environ.get('GITHUB_SHA'),
+              "reports": {}
+          }
+          
+          if sast_data:
+              payload["reports"]["sast"] = {"scanner": "semgrep", "data": sast_data}
+          if sca_data:
+              payload["reports"]["sca"] = {"scanner": "npm-audit", "data": sca_data}
+
+          backend_url = os.environ.get('BACKEND_URL', '').rstrip('/')
+          if backend_url and os.environ.get('API_TOKEN'):
+              url = f"{backend_url}/api/scans/github/"
+              headers = {
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {os.environ.get('API_TOKEN')}"
+              }
+              try:
+                  response = requests.post(url, json=payload, headers=headers, timeout=60)
+                  print(f"Status Code: {response.status_code}")
+              except Exception as e:
+                  print(f"Error: {e}")
+          else:
+              print("Skipping report: BACKEND_URL or API_TOKEN not set")
+          EOF

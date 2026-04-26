@@ -2,6 +2,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
+from django.shortcuts import get_object_or_404
 from ..models import ScanResult, ApiUsage
 
 @api_view(['GET'])
@@ -99,3 +100,26 @@ def get_dashboard_stats(request):
             'rag_calls_limit': api_usage.rag_calls_limit
         }
     }, status=status.HTTP_200_OK)
+
+@api_view(['DELETE'])
+@permission_classes([AllowAny])
+def delete_scan(request, scan_id):
+    """Supprime un scan spécifique"""
+    user_filter = request.user if request.user.is_authenticated else None
+    scan = get_object_or_404(ScanResult, id=scan_id, user=user_filter)
+    scan.delete()
+    return Response({'message': 'Scan supprimé avec succès'}, status=status.HTTP_200_OK)
+
+@api_view(['DELETE'])
+@permission_classes([AllowAny])
+def delete_all_scans(request, owner, repo):
+    """Supprime tout l'historique des scans d'un dépôt"""
+    user_filter = request.user if request.user.is_authenticated else None
+    scans = ScanResult.objects.filter(
+        user=user_filter,
+        repo_owner=owner,
+        repo_name=repo
+    )
+    count = scans.count()
+    scans.delete()
+    return Response({'message': f'{count} scans supprimés'}, status=status.HTTP_200_OK)

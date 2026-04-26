@@ -119,3 +119,24 @@ class ApiUsage(models.Model):
 
     def __str__(self):
         return f"Usage API pour {self.user.username}: {self.rag_calls_count}/{self.rag_calls_limit}"
+
+
+class GitHubAppInstallation(models.Model):
+    """Installation de la GitHub App VulnOps sur un compte utilisateur"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='github_app_installations', null=True, blank=True)
+    installation_id = models.BigIntegerField(unique=True)
+    github_account_login = models.CharField(max_length=255)  # Nom du compte GitHub
+    github_account_id = models.BigIntegerField()
+    github_account_type = models.CharField(max_length=50)  # 'User' ou 'Organization'
+    repositories = models.JSONField(default=list, blank=True)  # Liste des repos autorisés
+    status = models.CharField(max_length=20, default='active')  # active, suspended, deleted
+    setup_completed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Installation {self.installation_id} ({self.github_account_login})"
+
+    class Meta:
+        verbose_name = "Installation GitHub App"
+        verbose_name_plural = "Installations GitHub App"

@@ -16,4 +16,6 @@ urlpatterns = [
     path('dast/scan/', views.trigger_dast_scan, name='dast_scan'),
     path('dast/auto-scan/', views.trigger_auto_build_dast_scan, name='dast_auto_scan'),
     path('github/', views.github_cicd_webhook, name='github-cicd-webhook'),
+    path('history/<str:owner>/<str:repo>/delete-all/', views.delete_all_scans, name='delete-history-all'),
+    path('detail/<int:scan_id>/delete/', views.delete_scan, name='delete-scan'),
 ]

@@ -126,6 +126,27 @@ def list_repos(request):
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
+def get_branches(request, owner, repo):
+    """Liste les branches d'un dépôt GitHub"""
+    token = get_github_token(request)
+    headers = {'Accept': 'application/json'}
+    if token:
+        headers['Authorization'] = f'token {token}'
+    
+    response = requests.get(
+        f'https://api.github.com/repos/{owner}/{repo}/branches',
+        headers=headers,
+        timeout=10
+    )
+    
+    if response.status_code != 200:
+        return Response({'error': 'Impossible de récupérer les branches'}, status=response.status_code)
+    
+    return Response(response.json())
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
 def get_file_tree(request, owner, repo):
     """Retourne l'arborescence complète d'un dépôt GitHub"""
     token = get_github_token(request)

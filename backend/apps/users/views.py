@@ -11,6 +11,42 @@ from rest_framework import status
 from .models import GitHubProfile
 
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_manual(request):
+    """Inscription manuelle d'un utilisateur"""
+    username = request.data.get('username')
+    email = request.data.get('email')
+    password = request.data.get('password')
+    
+    if not username or not password:
+        return Response({'error': 'Username and password are required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if User.objects.filter(username=username).exists():
+        return Response({'error': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    user = User.objects.create_user(username=username, email=email, password=password)
+    login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+    return Response({'message': 'User created successfully', 'username': username})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_manual(request):
+    """Connexion manuelle d'un utilisateur"""
+    username = request.data.get('username')
+    password = request.data.get('password')
+    
+    from django.contrib.auth import authenticate
+    user = authenticate(request, username=username, password=password)
+    
+    if user is not None:
+        login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+        return Response({'message': 'Login successful', 'username': username})
+    else:
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def github_login(request):
@@ -38,25 +74,52 @@ def github_callback(request):
     if not code:
         return Response({'error': 'Code manquant'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Nettoyage des credentials au cas où il y aurait des espaces invisibles
+    client_id = settings.GITHUB_CLIENT_ID.strip()
+    client_secret = settings.GITHUB_CLIENT_SECRET.strip()
+
     # Échange le code contre un token d'accès
     token_response = requests.post(
         'https://github.com/login/oauth/access_token',
         data={
-            'client_id': settings.GITHUB_CLIENT_ID,
-            'client_secret': settings.GITHUB_CLIENT_SECRET,
-            'code': code,
-            'redirect_uri': settings.GITHUB_REDIRECT_URI,
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'code': code.strip(),
         },
-        headers={'Accept': 'application/json'},
-        timeout=10
+        headers={
+            'Accept': 'application/json',
+            'User-Agent': 'VulnOps-App-v2'
+        },
+        timeout=20
     )
 
-    token_data = token_response.json()
+    print(f"DEBUG: Status Code: {token_response.status_code}")
+    print(f"DEBUG: Response Headers: {token_response.headers}")
+    print(f"DEBUG: Response Body: '{token_response.text}'")
+
+    try:
+        token_data = token_response.json()
+    except Exception as e:
+        print(f"DEBUG: JSONDecodeError details: {e}")
+        # Fallback if GitHub returns query parameters instead of JSON
+        import urllib.parse
+        token_data = dict(urllib.parse.parse_qsl(token_response.text))
+        print(f"DEBUG: Parsed as query string: {token_data}")
+
     access_token = token_data.get('access_token')
 
     if not access_token:
-        error = token_data.get('error_description', 'Impossible d\'obtenir le token')
-        return Response({'error': error}, status=status.HTTP_400_BAD_REQUEST)
+        error_desc = token_data.get('error_description')
+        error_code = token_data.get('error')
+        full_error = f"{error_code}: {error_desc}" if error_code and error_desc else (error_desc or error_code or "Impossible d'obtenir le token")
+        
+        return Response({
+            'error': full_error,
+            'debug_info': {
+                'status_code': token_response.status_code,
+                'raw_response': token_response.text[:200] # Limiter la taille
+            }
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     # Récupère le profil GitHub de l'utilisateur
     user_response = requests.get(
@@ -124,18 +187,25 @@ def github_callback(request):
 @permission_classes([IsAuthenticated])
 def me(request):
     """Retourne les informations de l'utilisateur connecté"""
+    data = {
+        'id': request.user.id,
+        'username': request.user.username,
+        'email': request.user.email,
+        'is_github_user': False
+    }
     try:
         profile = request.user.github_profile
-        return Response({
-            'id': request.user.id,
-            'username': request.user.username,
+        data.update({
             'github_login': profile.github_login,
             'github_name': profile.github_name,
             'github_email': profile.github_email,
             'github_avatar_url': profile.github_avatar_url,
+            'is_github_user': True
         })
-    except GitHubProfile.DoesNotExist:
-        return Response({'error': 'Profil GitHub non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception:
+        pass
+    
+    return Response(data)
 
 
 @api_view(['POST'])

@@ -12,13 +12,16 @@ export default api;
 
 export const endpoints = {
   auth: {
-    login: '/accounts/github/login/',
+    github: '/accounts/github/login/',
+    login: '/accounts/login/',
+    register: '/accounts/register/',
     me: '/accounts/me/',
     logout: '/accounts/logout/',
   },
   projects: {
     list: '/projects/repos/',
     tree: (owner: string, repo: string) => `/projects/${owner}/${repo}/tree/`,
+    branches: (owner: string, repo: string) => `/projects/${owner}/${repo}/branches/`,
     file: (owner: string, repo: string) => `/projects/${owner}/${repo}/file/`,
   },
   scanner: {
@@ -33,5 +36,12 @@ export const endpoints = {
     dastCheck: '/scanner/dast/check-prerequisites/',
     dastScan: '/scanner/dast/scan/',
     dastAutoScan: '/scanner/dast/auto-scan/',
+  },
+  githubApp: {
+    install: '/github-app/install/',
+    status: '/github-app/status/',
+    repos: '/github-app/repos/',
+    setup: (owner: string, repo: string) => `/github-app/setup/${owner}/${repo}/`,
+    link: '/github-app/link/',
   },
 };

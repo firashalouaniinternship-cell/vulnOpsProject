@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { ChevronLeft, Loader2, Info, AlertTriangle, ShieldCheck, FileText, ExternalLink } from 'lucide-react';
+import { ChevronLeft, Loader2, Info, AlertTriangle, ShieldCheck, FileText, ExternalLink, Trash2, RotateCcw, GitBranch } from 'lucide-react';
 import api, { endpoints } from '../api/client';
 import FileTree from '../components/FileTree';
 import ScanResults, { type Vulnerability } from '../components/ScanResults';
@@ -35,6 +35,58 @@ const AnalysisPage: React.FC = () => {
   const [scanDate, setScanDate] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const hasResultsRef = useRef(false);
+  const [isDeleting, setIsDeleting] = useState<number | null>(null);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState<string>('main');
+  const [isTreeLoading, setIsTreeLoading] = useState(false);
+
+  const [deleteModalConfig, setDeleteModalConfig] = useState<{
+    isOpen: boolean;
+    type: 'single' | 'all';
+    scanId?: number;
+  }>({ isOpen: false, type: 'single' });
+
+  const handleDeleteScan = (e: React.MouseEvent, scanId: number) => {
+    e.stopPropagation();
+    setDeleteModalConfig({ isOpen: true, type: 'single', scanId });
+  };
+
+  const handleDeleteAllHistory = () => {
+    setDeleteModalConfig({ isOpen: true, type: 'all' });
+  };
+
+  const executeDeletion = async () => {
+    const { type, scanId } = deleteModalConfig;
+
+    if (type === 'single' && scanId) {
+      setIsDeleting(scanId);
+      try {
+        await api.delete(`${endpoints.scanner.detail(scanId)}delete/`);
+        setHistory(prev => prev.filter(s => s.id !== scanId));
+        if (scanResults && scanResults.length > 0 && history.find(s => s.id === scanId)) {
+          // Clean search if needed
+        }
+      } catch (err) {
+        console.error('Erreur lors de la suppression du scan:', err);
+        alert("Erreur lors de la suppression");
+      } finally {
+        setIsDeleting(null);
+        setDeleteModalConfig({ ...deleteModalConfig, isOpen: false });
+      }
+    } else if (type === 'all') {
+      try {
+        await api.delete(`${endpoints.scanner.history(owner || '', repo || '')}delete-all/`);
+        setHistory([]);
+        setScanResults([]);
+        setMetrics(null);
+      } catch (err) {
+        console.error('Erreur lors de la suppression de l\'historique:', err);
+        alert("Erreur lors de la suppression de l'historique");
+      } finally {
+        setDeleteModalConfig({ ...deleteModalConfig, isOpen: false });
+      }
+    }
+  };
 
   const scannerName = selectedScanner === 'sonarcloud' ? 'SonarCloud' :
     selectedScanner === 'eslint' ? 'ESLint' :
@@ -53,13 +105,23 @@ const AnalysisPage: React.FC = () => {
       try {
         if (!owner || !repo) return;
 
-        const [treeRes, historyRes] = await Promise.all([
-          api.get(endpoints.projects.tree(owner, repo), { params: customToken ? { custom_token: customToken } : undefined }),
-          api.get(endpoints.scanner.history(owner, repo), { params: customToken ? { custom_token: customToken } : undefined })
+        const [treeRes, historyRes, branchesRes] = await Promise.all([
+          api.get(endpoints.projects.tree(owner, repo), { 
+            params: { 
+              ...(customToken ? { custom_token: customToken } : {}),
+              branch: selectedBranch 
+            } 
+          }),
+          api.get(endpoints.scanner.history(owner, repo), { params: customToken ? { custom_token: customToken } : undefined }),
+          api.get(endpoints.projects.branches(owner, repo), { params: customToken ? { custom_token: customToken } : undefined })
         ]);
 
         setTree(treeRes.data.tree);
         setHistory(historyRes.data);
+        setBranches(branchesRes.data);
+        
+        // Si la branche par défaut n'est pas main/master, on pourrait vouloir la setter ici
+        // Mais pour l'instant on garde 'main' ou celle choisie.
       } catch (err) {
         console.error('Erreur lors du chargement des données:', err);
       } finally {
@@ -68,6 +130,25 @@ const AnalysisPage: React.FC = () => {
     };
     fetchData();
   }, [owner, repo]);
+
+  const handleBranchChange = async (branchName: string) => {
+    setSelectedBranch(branchName);
+    setIsTreeLoading(true);
+    try {
+      const res = await api.get(endpoints.projects.tree(owner || '', repo || ''), {
+        params: {
+          ...(customToken ? { custom_token: customToken } : {}),
+          branch: branchName
+        }
+      });
+      setTree(res.data.tree);
+      setSelectedPaths(new Set()); // Reset selection when branch changes
+    } catch (err) {
+      console.error('Erreur changement branche:', err);
+    } finally {
+      setIsTreeLoading(false);
+    }
+  };
 
 
 
@@ -170,9 +251,9 @@ const AnalysisPage: React.FC = () => {
     <div className="app-container">
       <nav className="navbar">
         <div className="flex items-center gap-4">
-          <button 
-            onClick={() => navigate(location.state?.fromDashboard ? '/Dashboard' : '/MesProjects')} 
-            className="flex items-center gap-1" 
+          <button
+            onClick={() => navigate(location.state?.fromDashboard ? '/Dashboard' : '/MesProjects')}
+            className="flex items-center gap-1"
             style={{ color: 'var(--text-dim)', fontSize: '14px' }}
           >
             <ChevronLeft size={16} />
@@ -180,6 +261,33 @@ const AnalysisPage: React.FC = () => {
           </button>
           <div style={{ width: '1px', height: '20px', background: 'var(--border)' }}></div>
           <h2 style={{ fontSize: '18px', fontWeight: 'bold' }}>{owner} / {repo}</h2>
+          
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.03)', padding: '4px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+            <GitBranch size={14} color="var(--primary)" />
+            <select 
+              value={selectedBranch}
+              onChange={(e) => handleBranchChange(e.target.value)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'white',
+                fontSize: '13px',
+                fontWeight: 600,
+                outline: 'none',
+                cursor: 'pointer',
+                padding: '2px 0'
+              }}
+            >
+              {branches.length > 0 ? (
+                branches.map(b => (
+                  <option key={b.name} value={b.name} style={{ background: '#0f172a' }}>{b.name}</option>
+                ))
+              ) : (
+                <option value={selectedBranch}>{selectedBranch}</option>
+              )}
+            </select>
+          </div>
+
           <span className="badge badge-low" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-dim)', border: '1px solid var(--border)' }}>
             {repoLanguage}
           </span>
@@ -194,13 +302,13 @@ const AnalysisPage: React.FC = () => {
               <span style={{ fontWeight: 600, fontSize: '14px' }}>Explorateur</span>
               <FileText size={16} color="var(--text-dim)" />
             </div>
-            {loading ? (
+            {loading || isTreeLoading ? (
               <div style={{ padding: '20px', textAlign: 'center' }}>
                 <Loader2 size={24} className="animate-spin" />
               </div>
             ) : (
-              <FileTree 
-                tree={tree} 
+              <FileTree
+                tree={tree}
                 selectedPaths={selectedPaths}
                 onSelectionChange={setSelectedPaths}
               />
@@ -208,6 +316,7 @@ const AnalysisPage: React.FC = () => {
             <div className="panel-footer" style={{ padding: '16px', background: 'transparent' }}>
               <AutoScannerSimplified
                 repoFullName={`${owner}/${repo}`}
+                branch={selectedBranch}
                 cloneUrl={cloneUrl}
                 repoName={repo || ''}
                 repoOwner={owner || ''}
@@ -261,11 +370,11 @@ const AnalysisPage: React.FC = () => {
               <div className="flex items-center gap-3">
                 {scanResults.length > 0 && (
                   <button
-                    onClick={() => { 
-                      setScanResults([]); 
-                      setMetrics(null); 
+                    onClick={() => {
+                      setScanResults([]);
+                      setMetrics(null);
                       setScanDate(null);
-                      setActiveTab('sast'); 
+                      setActiveTab('sast');
                     }}
                     className="flex items-center gap-1 hover:text-white transition-colors"
                     style={{
@@ -283,7 +392,7 @@ const AnalysisPage: React.FC = () => {
                   </button>
                 )}
                 <span style={{ fontWeight: 600, fontSize: '14px' }}>
-                  {scanResults.length > 0 ? `Résultats de l'analyse ${scannerName}` : "Historique des scans"}
+                  {scanResults.length > 0 ? `Résultats de l'analyse :` : "Historique des scans"}
                 </span>
                 {scanResults.length > 0 && (
                   <span className="badge badge-low" style={{ background: 'var(--primary)', color: 'white', marginLeft: '8px' }}>
@@ -291,14 +400,14 @@ const AnalysisPage: React.FC = () => {
                   </span>
                 )}
               </div>
-              
+
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                 {scanDate && (
-                  <div style={{ 
-                    fontSize: '12px', 
-                    color: 'var(--text-dim)', 
-                    display: 'flex', 
-                    alignItems: 'center', 
+                  <div style={{
+                    fontSize: '12px',
+                    color: 'var(--text-dim)',
+                    display: 'flex',
+                    alignItems: 'center',
                     gap: '6px',
                     padding: '4px 8px',
                     background: 'rgba(255,255,255,0.03)',
@@ -414,20 +523,20 @@ const AnalysisPage: React.FC = () => {
                 {currentScanFeatures.run_dast && (
                   <button
                     onClick={() => setActiveTab('dast')}
-                  style={{
-                    padding: '12px 20px',
-                    background: 'none',
-                    border: 'none',
-                    borderBottom: activeTab === 'dast' ? '2px solid var(--primary)' : '2px solid transparent',
-                    color: activeTab === 'dast' ? 'white' : 'var(--text-dim)',
-                    fontWeight: 600,
-                    fontSize: '13px',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  🌐 DAST (ZAP)
-                </button>
+                    style={{
+                      padding: '12px 20px',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: activeTab === 'dast' ? '2px solid var(--primary)' : '2px solid transparent',
+                      color: activeTab === 'dast' ? 'white' : 'var(--text-dim)',
+                      fontWeight: 600,
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    🌐 DAST (ZAP)
+                  </button>
                 )}
                 {!scanning && (
                   <button
@@ -472,7 +581,7 @@ const AnalysisPage: React.FC = () => {
                       const historyRes = await api.get(endpoints.scanner.history(owner, repo), { params: customToken ? { custom_token: customToken } : undefined });
                       setHistory(historyRes.data);
                     }
-                  if (data.scan_id) await loadPastScan(data.scan_id);
+                    if (data.scan_id) await loadPastScan(data.scan_id);
                   }}
                 />
               ) : activeTab === 'report' ? (
@@ -507,7 +616,29 @@ const AnalysisPage: React.FC = () => {
 
                   {history.length > 0 && (
                     <div style={{ marginTop: '32px', width: '100%', maxWidth: '1000px' }}>
-                      <p style={{ fontSize: '12px', marginBottom: '12px', textAlign: 'left', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '1px' }}>Historique des scans :</p>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <p style={{ fontSize: '12px', margin: 0, textAlign: 'left', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '1px' }}>Historique des scans :</p>
+                        <button
+                          onClick={handleDeleteAllHistory}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--high)',
+                            fontSize: '11px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            opacity: 0.7,
+                            transition: 'opacity 0.2s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
+                        >
+                          <RotateCcw size={12} />
+                          Tout effacer
+                        </button>
+                      </div>
                       <div style={{
                         display: 'flex',
                         flexDirection: 'column',
@@ -558,16 +689,44 @@ const AnalysisPage: React.FC = () => {
                                 ].filter((item, pos, self) => Boolean(item) && self.indexOf(item) === pos).join(', ')}
                               </div>
                             </div>
-                            <div className="flex flex-col items-end gap-1" style={{ minWidth: '100px' }}>
-                              <span style={{
-                                color: scan.total_issues > 10 ? 'var(--high)' : scan.total_issues > 0 ? 'var(--warning)' : 'var(--success)',
-                                fontWeight: 'bold'
-                              }}>
-                                {scan.total_issues} issues
-                              </span>
-                              <span className={`status-text ${scan.status.toLowerCase()}`} style={{ fontSize: '10px', textTransform: 'uppercase', opacity: 0.6 }}>
-                                {scan.status === 'COMPLETED' ? 'Terminé' : scan.status === 'FAILED' ? 'Échoué' : 'En cours'}
-                              </span>
+                            <div className="flex items-center gap-4">
+                              <div className="flex flex-col items-end gap-1" style={{ minWidth: '100px' }}>
+                                <span style={{
+                                  color: scan.total_issues > 10 ? 'var(--high)' : scan.total_issues > 0 ? 'var(--warning)' : 'var(--success)',
+                                  fontWeight: 'bold'
+                                }}>
+                                  {scan.total_issues} issues
+                                </span>
+                                <span className={`status-text ${scan.status.toLowerCase()}`} style={{ fontSize: '10px', textTransform: 'uppercase', opacity: 0.6 }}>
+                                  {scan.status === 'COMPLETED' ? 'Terminé' : scan.status === 'FAILED' ? 'Échoué' : 'En cours'}
+                                </span>
+                              </div>
+                              <button
+                                onClick={(e) => handleDeleteScan(e, scan.id)}
+                                disabled={isDeleting === scan.id}
+                                style={{
+                                  background: 'rgba(239, 68, 68, 0.1)',
+                                  border: '1px solid rgba(239, 68, 68, 0.2)',
+                                  borderRadius: '6px',
+                                  padding: '8px',
+                                  color: '#ef4444',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = '#ef4444';
+                                  e.currentTarget.style.color = 'white';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                                  e.currentTarget.style.color = '#ef4444';
+                                }}
+                              >
+                                {isDeleting === scan.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                              </button>
                             </div>
                           </div>
                         ))}
@@ -582,6 +741,13 @@ const AnalysisPage: React.FC = () => {
       </main>
 
       <ZeroVulnModal isOpen={showZeroModal} onClose={() => setShowZeroModal(false)} />
+
+      <DeleteConfirmModal
+        isOpen={deleteModalConfig.isOpen}
+        onClose={() => setDeleteModalConfig({ ...deleteModalConfig, isOpen: false })}
+        onConfirm={executeDeletion}
+        type={deleteModalConfig.type}
+      />
 
       <style>{`
         @keyframes fadeIn {
@@ -669,8 +835,109 @@ const ZeroVulnModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isO
           onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
           onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
         >
-          Close
+          Fermer
         </button>
+      </div>
+    </div>
+  );
+};
+
+const DeleteConfirmModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  type: 'single' | 'all';
+}> = ({ isOpen, onClose, onConfirm, type }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0, 0, 0, 0.85)',
+      backdropFilter: 'blur(8px)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1100,
+      padding: '20px',
+      animation: 'fadeIn 0.2s ease-out'
+    }}>
+      <div className="card" style={{
+        width: '100%',
+        maxWidth: '420px',
+        textAlign: 'center',
+        padding: '32px',
+        background: 'var(--bg-card)',
+        border: '1px solid rgba(239, 68, 68, 0.2)',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+        animation: 'scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+      }}>
+        <div style={{
+          width: '64px',
+          height: '64px',
+          background: 'rgba(239, 68, 68, 0.1)',
+          borderRadius: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 24px',
+          border: '1px solid rgba(239, 68, 68, 0.2)'
+        }}>
+          <AlertTriangle size={32} color="#ef4444" />
+        </div>
+
+        <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '12px', color: 'white' }}>
+          {type === 'all' ? "Supprimer tout l'historique" : "Supprimer ce scan"}
+        </h2>
+
+        <p style={{ color: 'var(--text-dim)', lineHeight: '1.6', fontSize: '14px', marginBottom: '32px' }}>
+          {type === 'all'
+            ? "Êtes-vous certain de vouloir supprimer TOUT l'historique des scans de ce projet ? Cette action est irréversible."
+            : "Voulez-vous vraiment supprimer ce scan ? Toutes les vulnérabilités associées seront également effacées."}
+        </p>
+
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button
+            onClick={onClose}
+            style={{
+              flex: 1,
+              padding: '12px',
+              background: 'rgba(255,255,255,0.05)',
+              color: 'white',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background 0.2s'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+          >
+            Annuler
+          </button>
+          <button
+            onClick={onConfirm}
+            style={{
+              flex: 1,
+              padding: '12px',
+              background: '#ef4444',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background 0.2s'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = '#dc2626'}
+            onMouseLeave={(e) => e.currentTarget.style.background = '#ef4444'}
+          >
+            Supprimer
+          </button>
+        </div>
       </div>
     </div>
   );

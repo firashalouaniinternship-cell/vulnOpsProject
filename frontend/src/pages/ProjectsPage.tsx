@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import logo from '../assets/logo.svg';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { 
-  Search, FolderGit2, Star, GitFork, ExternalLink, Loader2, LogOut, 
-  LayoutDashboard, Shield, Globe, Lock, Code2, Clock, Link
+import {
+  Search, FolderGit2, Star, GitFork, ExternalLink, Loader2, LogOut,
+  LayoutDashboard, Shield, Globe, Lock, Code2, Clock, Link, MessageCircle, Plus, Key, Cpu
 } from 'lucide-react';
 import api, { endpoints } from '../api/client';
 
@@ -31,10 +32,11 @@ const ProjectsPage: React.FC = () => {
     if (path === '/Dashboard') return 'dashboard';
     if (path === '/MesProjects') return 'projects';
     if (path === '/ProjetExterne') return 'external';
+    if (path === '/llm-config') return 'llm-config';
     return (location.state as any)?.view || 'dashboard';
   };
 
-  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'external'>(
+  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'external' | 'llm-config'>(
     getActiveViewFromPath(location.pathname)
   );
 
@@ -43,7 +45,12 @@ const ProjectsPage: React.FC = () => {
   }, [location.pathname]);
   const [filterType, setFilterType] = useState<'all' | 'public' | 'private'>('all');
   const [dashboardStats, setDashboardStats] = useState<any>(null);
-  
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState([
+    { role: 'assistant', text: 'Bonjour ! Je suis l\'assistant VulnOps. Comment puis-je vous aider aujourd\'hui ?' }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+
   // External Project State
   const [extUrl, setExtUrl] = useState('');
   const [extToken, setExtToken] = useState('');
@@ -76,12 +83,12 @@ const ProjectsPage: React.FC = () => {
       }
 
       const data = await response.json();
-      navigate(`/analysis/${data.full_name}`, { 
-        state: { 
+      navigate(`/analysis/${data.full_name}`, {
+        state: {
           language: data.language,
           cloneUrl: data.clone_url,
-          customToken: extToken 
-        } 
+          customToken: extToken
+        }
       });
     } catch (error) {
       console.error(error);
@@ -126,9 +133,9 @@ const ProjectsPage: React.FC = () => {
   const filteredRepos = repos.filter(repo => {
     const matchesSearch = repo.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (repo.description && repo.description.toLowerCase().includes(searchTerm.toLowerCase()));
-    
+
     if (!matchesSearch) return false;
-    
+
     if (filterType === 'public') return !repo.private;
     if (filterType === 'private') return repo.private;
     return true; // 'all'
@@ -153,30 +160,41 @@ const ProjectsPage: React.FC = () => {
   return (
     <div className="app-container" style={{ display: 'flex', minHeight: '100vh', background: '#0a0d14' }}>
       {/* Sidebar */}
-      <aside style={{ 
-        width: '260px', 
-        background: '#0f121a', 
-        borderRight: '1px solid var(--border)', 
-        display: 'flex', 
+      <aside style={{
+        width: '260px',
+        background: '#0f121a',
+        borderRight: '1px solid var(--border)',
+        display: 'flex',
         flexDirection: 'column',
         position: 'fixed',
         height: '100vh',
         zIndex: 100
       }}>
         <div style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <Shield size={32} color="var(--primary)" />
+          <div style={{
+            width: '25px',
+            height: '25px',
+            background: 'white',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+          }}>
+            <img src={logo} alt="Logo" style={{ width: '24px', height: '24px', objectFit: 'contain' }} />
+          </div>
           <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'white' }}>VulnOps</h2>
         </div>
 
         <nav style={{ flex: 1, padding: '12px' }}>
-          <div 
+          <div
             onClick={() => navigate('/Dashboard')}
-            style={{ 
-              padding: '12px 16px', 
-              borderRadius: '8px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '12px', 
+            style={{
+              padding: '12px 16px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
               cursor: 'pointer',
               background: activeView === 'dashboard' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
               color: activeView === 'dashboard' ? 'var(--primary)' : 'var(--text-dim)',
@@ -188,14 +206,14 @@ const ProjectsPage: React.FC = () => {
             <span style={{ fontWeight: 500 }}>Dashboard</span>
           </div>
 
-          <div 
+          <div
             onClick={() => navigate('/MesProjects')}
-            style={{ 
-              padding: '12px 16px', 
-              borderRadius: '8px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '12px', 
+            style={{
+              padding: '12px 16px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
               cursor: 'pointer',
               background: activeView === 'projects' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
               color: activeView === 'projects' ? 'var(--primary)' : 'var(--text-dim)',
@@ -206,15 +224,14 @@ const ProjectsPage: React.FC = () => {
             <FolderGit2 size={20} />
             <span style={{ fontWeight: 500 }}>Mes Projets</span>
           </div>
-
-          <div 
+          <div
             onClick={() => navigate('/ProjetExterne')}
-            style={{ 
-              padding: '12px 16px', 
-              borderRadius: '8px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '12px', 
+            style={{
+              padding: '12px 16px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
               cursor: 'pointer',
               background: activeView === 'external' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
               color: activeView === 'external' ? 'var(--primary)' : 'var(--text-dim)',
@@ -223,6 +240,43 @@ const ProjectsPage: React.FC = () => {
           >
             <Link size={20} />
             <span style={{ fontWeight: 500 }}>Projet Externe</span>
+          </div>
+
+          <div
+            onClick={() => navigate('/cicd')}
+            style={{
+              padding: '12px 16px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              cursor: 'pointer',
+              background: location.pathname === '/cicd' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+              color: location.pathname === '/cicd' ? 'var(--primary)' : 'var(--text-dim)',
+              marginBottom: '4px',
+              transition: 'all 0.2s'
+            }}
+          >
+            <Globe size={20} />
+            <span style={{ fontWeight: 500 }}>CI/CD Integration</span>
+          </div>
+
+          <div
+            onClick={() => navigate('/llm-config')}
+            style={{
+              padding: '12px 16px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              cursor: 'pointer',
+              background: activeView === 'llm-config' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+              color: activeView === 'llm-config' ? 'var(--primary)' : 'var(--text-dim)',
+              transition: 'all 0.2s'
+            }}
+          >
+            <Key size={20} />
+            <span style={{ fontWeight: 500 }}>Configuration LLM</span>
           </div>
         </nav>
 
@@ -238,7 +292,7 @@ const ProjectsPage: React.FC = () => {
               <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>Utilisateur</div>
             </div>
           </div>
-          <button onClick={handleLogout} className="flex items-center gap-2" style={{ 
+          <button onClick={handleLogout} className="flex items-center gap-2" style={{
             width: '100%',
             padding: '10px',
             borderRadius: '8px',
@@ -274,12 +328,12 @@ const ProjectsPage: React.FC = () => {
                 {dashboardStats?.recent_scans && dashboardStats.recent_scans.length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {dashboardStats.recent_scans.map((scan: any) => (
-                      <div 
-                        key={scan.id} 
-                        style={{ 
-                          padding: '12px', 
-                          background: 'rgba(255,255,255,0.03)', 
-                          border: '1px solid var(--border)', 
+                      <div
+                        key={scan.id}
+                        style={{
+                          padding: '12px',
+                          background: 'rgba(255,255,255,0.03)',
+                          border: '1px solid var(--border)',
                           borderRadius: '8px',
                           display: 'flex',
                           justifyContent: 'space-between',
@@ -332,10 +386,10 @@ const ProjectsPage: React.FC = () => {
                     </span>
                   </div>
                   <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', position: 'relative', overflow: 'hidden' }}>
-                    <div style={{ 
-                      width: `${Math.min(100, ((dashboardStats?.api_usage?.rag_calls_count || 0) / (dashboardStats?.api_usage?.rag_calls_limit || 100)) * 100)}%`, 
-                      height: '100%', 
-                      background: 'var(--primary)', 
+                    <div style={{
+                      width: `${Math.min(100, ((dashboardStats?.api_usage?.rag_calls_count || 0) / (dashboardStats?.api_usage?.rag_calls_limit || 100)) * 100)}%`,
+                      height: '100%',
+                      background: 'var(--primary)',
                       borderRadius: '3px',
                       transition: 'width 0.5s ease-out'
                     }}></div>
@@ -354,19 +408,19 @@ const ProjectsPage: React.FC = () => {
             <form onSubmit={handleExternalProjectSubmit} className="card" style={{ padding: '32px' }}>
               <div style={{ marginBottom: '24px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', color: 'white', fontWeight: 500 }}>URL du dépôt GitHub</label>
-                <input 
-                  type="url" 
+                <input
+                  type="url"
                   required
-                  placeholder="https://github.com/owner/repo" 
+                  placeholder="https://github.com/owner/repo"
                   value={extUrl}
                   onChange={(e) => setExtUrl(e.target.value)}
                   autoComplete="off"
-                  style={{ 
-                    width: '100%', 
-                    padding: '12px', 
-                    background: 'var(--bg-secondary)', 
-                    border: '1px solid var(--border)', 
-                    borderRadius: '8px', 
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
                     color: 'white',
                     fontSize: '14px',
                     outline: 'none'
@@ -378,18 +432,18 @@ const ProjectsPage: React.FC = () => {
                 <label style={{ display: 'block', marginBottom: '8px', color: 'white', fontWeight: 500 }}>
                   Personal Access Token <span style={{ color: 'var(--text-dim)', fontSize: '12px', fontWeight: 'normal' }}>(Optionnel pour public, Requis pour privé)</span>
                 </label>
-                <input 
-                  type="password" 
-                  placeholder="ghp_xxxxxxxxxxxx" 
+                <input
+                  type="password"
+                  placeholder="ghp_xxxxxxxxxxxx"
                   value={extToken}
                   onChange={(e) => setExtToken(e.target.value)}
                   autoComplete="new-password"
-                  style={{ 
-                    width: '100%', 
-                    padding: '12px', 
-                    background: 'var(--bg-secondary)', 
-                    border: '1px solid var(--border)', 
-                    borderRadius: '8px', 
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
                     color: 'white',
                     fontSize: '14px',
                     outline: 'none'
@@ -400,8 +454,8 @@ const ProjectsPage: React.FC = () => {
                 </p>
               </div>
 
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={extLoading || !extUrl}
                 style={{
                   width: '100%',
@@ -425,6 +479,56 @@ const ProjectsPage: React.FC = () => {
               </button>
             </form>
           </div>
+        ) : activeView === 'llm-config' ? (
+          <div style={{ animation: 'fadeIn 0.3s ease-out', maxWidth: '800px', margin: '0 auto', textAlign: 'center' }}>
+            <div style={{ marginBottom: '40px' }}>
+              <h1 style={{ fontSize: '32px', fontWeight: 'bold', color: 'white', marginBottom: '12px' }}>Configuration de l'IA</h1>
+              <p style={{ color: 'var(--text-dim)', fontSize: '16px' }}>Personnalisez votre modèle de langage pour l'analyse des vulnérabilités.</p>
+            </div>
+
+            <div className="card" style={{ maxWidth: '550px', padding: '40px', margin: '0 auto', textAlign: 'left', background: 'rgba(30, 41, 59, 0.4)', backdropFilter: 'blur(10px)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', fontWeight: 600, color: 'white', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <Key size={18} color="var(--primary)" />
+                    Clé API OpenRouter / Ollama
+                  </label>
+                  <input 
+                    type="password"
+                    placeholder="sk-or-v1-..."
+                    defaultValue={localStorage.getItem('llm_api_key') || ''}
+                    onBlur={(e) => localStorage.setItem('llm_api_key', e.target.value)}
+                    style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: '12px', color: 'white', outline: 'none', transition: 'border-color 0.2s' }}
+                    onFocus={(e) => e.target.style.borderColor = 'var(--primary)'}
+                  />
+                  <p style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '10px', opacity: 0.8 }}>Votre clé est stockée localement dans votre navigateur pour une sécurité maximale.</p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', fontWeight: 600, color: 'white', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <Cpu size={18} color="var(--primary)" />
+                    Modèle LLM
+                  </label>
+                  <input 
+                    type="text"
+                    placeholder="google/gemini-2.0-flash-exp:free"
+                    defaultValue={localStorage.getItem('llm_model_name') || 'google/gemini-2.0-flash-exp:free'}
+                    onBlur={(e) => localStorage.setItem('llm_model_name', e.target.value)}
+                    style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: '12px', color: 'white', outline: 'none', transition: 'border-color 0.2s' }}
+                    onFocus={(e) => e.target.style.borderColor = 'var(--primary)'}
+                  />
+                </div>
+
+                <button 
+                  onClick={() => alert('Configuration enregistrée avec succès !')}
+                  className="btn-primary" 
+                  style={{ padding: '16px', fontWeight: 'bold', fontSize: '16px', borderRadius: '12px', marginTop: '8px' }}
+                >
+                  Enregistrer la configuration
+                </button>
+              </div>
+            </div>
+          </div>
         ) : (
           <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
             <div className="flex items-center justify-between" style={{ marginBottom: '32px' }}>
@@ -432,9 +536,9 @@ const ProjectsPage: React.FC = () => {
                 <h1 style={{ fontSize: '28px', fontWeight: 'bold', marginBottom: '8px', color: 'white' }}>Vos Projets GitHub</h1>
                 <p style={{ color: 'var(--text-dim)' }}>Sélectionnez un dépôt pour lancer une analyse de sécurité.</p>
               </div>
-              
+
               <div className="flex items-center" style={{ gap: '16px' }}>
-                <select 
+                <select
                   value={filterType}
                   onChange={(e) => setFilterType(e.target.value as any)}
                   style={{
@@ -455,17 +559,17 @@ const ProjectsPage: React.FC = () => {
 
                 <div style={{ position: 'relative', width: '300px' }}>
                   <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
-                  <input 
-                    type="text" 
-                    placeholder="Rechercher un dépôt..." 
+                  <input
+                    type="text"
+                    placeholder="Rechercher un dépôt..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    style={{ 
-                      width: '100%', 
-                      padding: '10px 12px 10px 40px', 
-                      background: 'var(--bg-card)', 
-                      border: '1px solid var(--border)', 
-                      borderRadius: '8px', 
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px 10px 40px',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
                       color: 'white',
                       fontSize: '14px'
                     }}
@@ -482,12 +586,12 @@ const ProjectsPage: React.FC = () => {
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
                 {filteredRepos.map(repo => (
-                  <div 
-                    key={repo.id} 
-                    className="card" 
-                    style={{ 
-                      cursor: 'pointer', 
-                      transition: 'transform 0.2s, border 0.2s, background 0.2s, opacity 0.2s', 
+                  <div
+                    key={repo.id}
+                    className="card"
+                    style={{
+                      cursor: 'pointer',
+                      transition: 'transform 0.2s, border 0.2s, background 0.2s, opacity 0.2s',
                       position: 'relative',
                       border: repo.has_scans ? '1px solid var(--border)' : '1px dashed rgba(207, 30, 30, 0.92)',
                       opacity: repo.has_scans ? 1 : 0.95,
@@ -507,10 +611,10 @@ const ProjectsPage: React.FC = () => {
                       <FolderGit2 size={20} color={repo.private ? 'var(--warning)' : (repo.has_scans ? 'var(--primary)' : 'var(--text-dim)')} />
                       <div className="flex gap-2">
                         {!repo.has_scans && (
-                          <span style={{ 
-                            fontSize: '10px', 
-                            fontWeight: 600, 
-                            color: 'var(--text-dim)', 
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            color: 'var(--text-dim)',
                             background: 'rgba(255,255,255,0.05)',
                             padding: '2px 6px',
                             borderRadius: '4px',
@@ -520,10 +624,10 @@ const ProjectsPage: React.FC = () => {
                           </span>
                         )}
                         {repo.private && <span className="badge badge-medium">Privé</span>}
-                        <a 
-                          href={repo.html_url} 
-                          target="_blank" 
-                          rel="noreferrer" 
+                        <a
+                          href={repo.html_url}
+                          target="_blank"
+                          rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
                           style={{ color: 'var(--text-dim)' }}
                         >
@@ -570,9 +674,136 @@ const ProjectsPage: React.FC = () => {
             )}
           </div>
         )}
+
       </main>
 
+      {/* Chat Window */}
+      {isChatOpen && (
+        <div style={{
+          position: 'fixed',
+          bottom: '100px',
+          right: '30px',
+          width: '380px',
+          height: '500px',
+          background: '#1e293b',
+          borderRadius: '24px',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          display: 'flex',
+          flexDirection: 'column',
+          zIndex: 1001,
+          animation: 'slideIn 0.3s ease-out',
+          overflow: 'hidden'
+        }}>
+          {/* Header */}
+          <div style={{ padding: '20px', background: 'linear-gradient(135deg, #00B2FF 0%, #006AFF 100%)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ width: '40px', height: '40px', background: 'rgba(255,255,255,0.2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Shield size={20} color="white" />
+              </div>
+              <div>
+                <div style={{ fontWeight: 'bold', fontSize: '15px' }}>Assistant VulnOps</div>
+                <div style={{ fontSize: '12px', opacity: 0.8 }}>En ligne</div>
+              </div>
+            </div>
+            <button onClick={() => setIsChatOpen(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', opacity: 0.8 }}>
+              <Clock size={20} />
+            </button>
+          </div>
+
+          {/* Messages */}
+          <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {chatMessages.map((msg, i) => (
+              <div key={i} style={{
+                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                background: msg.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
+                padding: '12px 16px',
+                borderRadius: msg.role === 'user' ? '16px 16px 0 16px' : '16px 16px 16px 0',
+                maxWidth: '80%',
+                fontSize: '14px',
+                lineHeight: '1.5'
+              }}>
+                {msg.text}
+              </div>
+            ))}
+          </div>
+
+          {/* Input */}
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!chatInput.trim()) return;
+              setChatMessages([...chatMessages, { role: 'user', text: chatInput }]);
+              setChatInput('');
+              // Fake response
+              setTimeout(() => {
+                setChatMessages(prev => [...prev, { role: 'assistant', text: 'Je suis en cours de configuration. Posez-moi des questions sur vos vulnérabilités !' }]);
+              }, 1000);
+            }}
+            style={{ padding: '20px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: '12px' }}
+          >
+            <input 
+              type="text" 
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Écrivez un message..."
+              style={{ flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', padding: '10px 16px', color: 'white', outline: 'none' }}
+            />
+            <button type="submit" style={{ background: 'var(--primary)', border: 'none', borderRadius: '12px', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+              <ExternalLink size={18} color="white" />
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* Floating Messenger Icon */}
+      <div style={{
+        position: 'fixed',
+        bottom: '30px',
+        right: '30px',
+        width: '60px',
+        height: '60px',
+        background: 'linear-gradient(135deg, #00B2FF 0%, #006AFF 100%)',
+        borderRadius: '50%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxShadow: '0 8px 24px rgba(0, 106, 255, 0.4)',
+        cursor: 'pointer',
+        zIndex: 1000,
+        transition: 'transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+        transform: isChatOpen ? 'rotate(45deg) scale(0.9)' : 'rotate(0deg) scale(1)'
+      }}
+      onMouseEnter={(e) => e.currentTarget.style.transform = isChatOpen ? 'rotate(45deg) scale(1)' : 'scale(1.1)'}
+      onMouseLeave={(e) => e.currentTarget.style.transform = isChatOpen ? 'rotate(45deg) scale(0.9)' : 'scale(1)'}
+      onClick={() => setIsChatOpen(!isChatOpen)}
+      >
+        {isChatOpen ? <Plus size={30} color="white" /> : <MessageCircle size={30} color="white" fill="white" />}
+        {!isChatOpen && (
+          <div style={{
+            position: 'absolute',
+            top: '-2px',
+            right: '-2px',
+            width: '18px',
+            height: '18px',
+            background: '#FF3B30',
+            borderRadius: '50%',
+            border: '2px solid #0a0f1e',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '10px',
+            fontWeight: 'bold',
+            color: 'white'
+          }}>1</div>
+        )}
+      </div>
+
       <style>{`
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateY(20px) scale(0.95); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }

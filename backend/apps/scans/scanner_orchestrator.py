@@ -36,6 +36,7 @@ class AutoScannerOrchestrator:
         github_token: str,
         repo_owner: str,
         repo_name: str,
+        branch: str = None,
         cleanup: bool = True
     ) -> Dict:
         """
@@ -51,9 +52,9 @@ class AutoScannerOrchestrator:
         try:
             # Clone le dépôt dans un répertoire temporaire
             temp_dir = tempfile.mkdtemp(prefix="vulnops_analysis_")
-            logger.info(f"Cloning repository to {temp_dir}")
+            logger.info(f"Cloning repository to {temp_dir} (branch: {branch or 'default'})")
             
-            self.project_path = self._clone_repository(clone_url, github_token, temp_dir)
+            self.project_path = self._clone_repository(clone_url, github_token, temp_dir, branch=branch)
             
             # Analyse le projet
             logger.info(f"Analyzing project structure at {self.project_path}")
@@ -121,7 +122,7 @@ class AutoScannerOrchestrator:
                 except Exception as e:
                     logger.warning(f"Failed to clean up temporary directory: {e}")
     
-    def _clone_repository(self, clone_url: str, github_token: str, dest_dir: str) -> Path:
+    def _clone_repository(self, clone_url: str, github_token: str, dest_dir: str, branch: str = None) -> Path:
         """
         Clone un dépôt GitHub.
         
@@ -138,39 +139,30 @@ class AutoScannerOrchestrator:
                 f'https://{github_token}@github.com/'
             )
         
-        try:
             # Clone le dépôt (shallow clone pour performance)
-            logger.info(f"Cloning from {clone_url} (shallow clone)")
-            repo = Repo.clone_from(
-                clone_url,
-                dest_dir,
-                depth=1,  # Shallow clone
-                single_branch=True,
-                branch='main'  # Essaie 'main' en premier
-            )
+            logger.info(f"Cloning from {clone_url} (shallow clone, branch={branch or 'main'})")
+            
+            clone_kwargs = {
+                'depth': 1,
+                'single_branch': True,
+            }
+            if branch:
+                clone_kwargs['branch'] = branch
+            else:
+                clone_kwargs['branch'] = 'main'
+
+            try:
+                repo = Repo.clone_from(clone_url, dest_dir, **clone_kwargs)
+            except GitCommandError as e:
+                if not branch and 'main' in str(e).lower():
+                    logger.info("'main' branch not found, trying 'master'")
+                    clone_kwargs['branch'] = 'master'
+                    repo = Repo.clone_from(clone_url, dest_dir, **clone_kwargs)
+                else:
+                    raise
+
             logger.info(f"Repository cloned successfully to {dest_dir}")
             return Path(dest_dir)
-        
-        except GitCommandError as e:
-            # Si 'main' n'existe pas, essaie 'master'
-            if 'main' in str(e).lower():
-                logger.info("'main' branch not found, trying 'master'")
-                try:
-                    repo = Repo.clone_from(
-                        clone_url,
-                        dest_dir,
-                        depth=1,
-                        single_branch=True,
-                        branch='master'
-                    )
-                    logger.info(f"Repository cloned successfully with 'master' branch")
-                    return Path(dest_dir)
-                except GitCommandError as e2:
-                    logger.error(f"Failed to clone with 'master' branch: {e2}")
-                    raise
-            else:
-                logger.error(f"Git clone error: {e}")
-                raise
     
     def analyze_existing_project(self, project_path: str) -> Dict:
         """

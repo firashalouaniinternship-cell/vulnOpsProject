@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import logo from '../assets/logo.svg';
 import { GitBranch, ShieldAlert, Loader2, Search, Key, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api, { endpoints } from '../api/client';
@@ -14,6 +15,13 @@ const LoginPage: React.FC = () => {
   const [customToken, setCustomToken] = useState('');
   const [isFastScanLoading, setIsFastScanLoading] = useState(false);
 
+  // Manual Auth State
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [manualLoading, setManualLoading] = useState(false);
+
   // Vérifie si on revient du callback GitHub
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -26,13 +34,12 @@ const LoginPage: React.FC = () => {
     }
   }, []);
 
-  const handleLogin = async () => {
+  const handleGitHubLogin = async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await api.get(endpoints.auth.login);
+      const response = await api.get(endpoints.auth.github);
       if (response.data.auth_url) {
-        // Redirige vers GitHub
         window.location.href = response.data.auth_url;
       } else {
         setError("Erreur : L'URL d'authentification n'a pas été reçue.");
@@ -44,6 +51,30 @@ const LoginPage: React.FC = () => {
       setError(errorMsg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleManualAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setManualLoading(true);
+    setError(null);
+    try {
+      if (isRegistering) {
+        await api.post(endpoints.auth.register, { username, email, password });
+      } else {
+        await api.post(endpoints.auth.login, { username, password });
+      }
+      // Success -> check user and redirect
+      const userRes = await api.get(endpoints.auth.me);
+      if (userRes.data.is_github_user) {
+        navigate('/MesProjects');
+      } else {
+        navigate('/InternalDashboard');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Erreur d\'authentification');
+    } finally {
+      setManualLoading(false);
     }
   };
 
@@ -131,14 +162,14 @@ const LoginPage: React.FC = () => {
             alignItems: 'center',
             justifyContent: 'center',
             margin: '0 auto 20px',
-            boxShadow: '0 8px 16px -4px rgba(99, 102, 241, 0.4)'
+            boxShadow: '0 8px 16px -4px rgba(99, 102, 241, 0.4)',
+            overflow: 'hidden'
           }}>
-            <ShieldAlert size={36} color="white" />
+            <img src={logo} alt="VulnOps Logo" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '12px' }} />
           </div>
           <h1 style={{ fontSize: '32px', fontWeight: 800, marginBottom: '8px', letterSpacing: '-0.025em', color: 'white' }}>VulnOps</h1>
           <p style={{ color: 'var(--text-dim)', fontSize: '15px', lineHeight: '1.5' }}>
-            Sécurisez vos dépôts.<br />
-            <strong>Connexion & Inscription instantanée.</strong>
+            Sécurité automatisée pour vos développements.
           </p>
         </div>
 
@@ -159,45 +190,116 @@ const LoginPage: React.FC = () => {
         )}
 
         {viewMode === 'login' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ animation: 'fadeIn 0.5s ease-out' }}>
+            <div style={{ marginBottom: '24px', textAlign: 'center' }}>
+              <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: 'white', marginBottom: '8px' }}>
+                {isRegistering ? 'Rejoindre la plateforme' : 'Authentification'}
+              </h2>
+              <p style={{ color: 'var(--text-dim)', fontSize: '14px' }}>
+                {isRegistering ? 'Créez votre profil pour commencer l\'analyse.' : 'Heureux de vous revoir sur VulnOps.'}
+              </p>
+            </div>
+
+            <form onSubmit={handleManualAuth} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ position: 'relative' }}>
+                <input 
+                  type="text" 
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Nom d'utilisateur"
+                  style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: 'white', outline: 'none' }}
+                  required
+                />
+              </div>
+
+              {isRegistering && (
+                <div style={{ position: 'relative' }}>
+                  <input 
+                    type="email" 
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Email"
+                    style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: 'white', outline: 'none' }}
+                    required
+                  />
+                </div>
+              )}
+
+              <div style={{ position: 'relative' }}>
+                <input 
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Mot de passe"
+                  style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: 'white', outline: 'none' }}
+                  required
+                />
+              </div>
+
+              <button 
+                type="submit"
+                disabled={manualLoading}
+                className="btn-primary"
+                style={{ 
+                  width: '100%', 
+                  padding: '14px', 
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
+                  cursor: manualLoading ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {manualLoading ? <Loader2 size={20} className="animate-spin" /> : (isRegistering ? 'S\'inscrire' : 'Se connecter')}
+              </button>
+            </form>
+
+            <div style={{ display: 'flex', alignItems: 'center', margin: '24px 0', gap: '16px' }}>
+              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
+              <span style={{ fontSize: '12px', color: 'var(--text-dim)', fontWeight: 600 }}>OU</span>
+              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
+            </div>
+
             <button
-              onClick={handleLogin}
+              onClick={handleGitHubLogin}
               disabled={loading}
-              className="btn-primary"
               style={{
                 width: '100%',
-                justifyContent: 'center',
                 padding: '14px',
-                fontSize: '16px',
-                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                opacity: loading ? 0.7 : 1,
-                cursor: loading ? 'not-allowed' : 'pointer',
+                background: 'white',
+                color: '#0f172a',
+                borderRadius: '8px',
+                border: 'none',
+                fontWeight: 'bold',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '10px'
+                justifyContent: 'center',
+                gap: '10px',
+                cursor: loading ? 'not-allowed' : 'pointer'
               }}
             >
               {loading ? <Loader2 size={20} className="animate-spin" /> : <GitBranch size={20} />}
-              {loading ? 'Connexion en cours...' : 'Se connecter avec GitHub'}
+              Continuer avec GitHub
             </button>
 
-            {/* Toggel to anonymous */}
-            <div style={{ display: 'flex', alignItems: 'center', margin: '24px 0 0 0', gap: '16px' }}>
-              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
-              <button
-                onClick={() => setViewMode('anonymous')}
-                style={{
-                  background: 'none', border: 'none', color: 'var(--text-dim)',
-                  fontSize: '13px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em',
-                  cursor: 'pointer', transition: 'color 0.2s', padding: 0
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-main)'}
-                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
+            <div style={{ marginTop: '24px', textAlign: 'center' }}>
+              <button 
+                onClick={() => setIsRegistering(!isRegistering)}
+                style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer', fontSize: '14px' }}
               >
-                Analyse sans compte
+                {isRegistering ? 'Déjà un compte ? Se connecter' : 'Pas de compte ? S\'inscrire'}
               </button>
-              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
             </div>
+
+            {/* 
+            <div style={{ display: 'flex', alignItems: 'center', marginTop: '20px', gap: '12px', justifyContent: 'center' }}>
+              <button onClick={() => setViewMode('anonymous')} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '13px', cursor: 'pointer' }}>
+                Continuer sans compte
+              </button>
+            </div>
+            */}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', animation: 'slideDown 0.3s ease-out' }}>
