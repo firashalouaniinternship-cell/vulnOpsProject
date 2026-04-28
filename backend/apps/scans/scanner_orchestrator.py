@@ -37,7 +37,8 @@ class AutoScannerOrchestrator:
         repo_owner: str,
         repo_name: str,
         branch: str = None,
-        cleanup: bool = True
+        cleanup: bool = True,
+        scan_mode: str = 'standard',
     ) -> Dict:
         """
         Clone un dépôt et sélectionne automatiquement les scanners.
@@ -73,12 +74,13 @@ class AutoScannerOrchestrator:
                 }
             
             # Utilise LLMSelector pour sélectionner les scanners
-            logger.info("Using LLMSelector to select scanners")
+            logger.info(f"Using LLMSelector to select scanners (mode={scan_mode})")
             selection = self.selector.suggest_scanners(
                 languages=analysis['languages'],
                 frameworks=analysis['frameworks'],
                 file_counts=analysis['file_counts'],
-                structure_summary=analysis['structure_summary']
+                structure_summary=analysis['structure_summary'],
+                scan_mode=scan_mode,
             )
             
             # Combine l'analyse et la sélection

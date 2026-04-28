@@ -1,139 +1,97 @@
 """
-Module pour intégrer Ollama (en priorité) ou OpenRouter pour faire des appels
-à un modèle LLM afin de choisir automatiquement les scanners appropriés.
+Module pour intégrer Ollama (en priorité) ou OpenRouter pour choisir
+automatiquement les scanners appropriés selon le mode de scan demandé.
 """
 import os
 import json
 import logging
 import requests
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 from dotenv import load_dotenv
+
+from scanners.registry import SCANNER_REGISTRY, LANGUAGE_TO_SCANNER, is_scanner_available
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Scanners autorisés par mode
+_MODE_ALLOWED: dict[str, Optional[Set[str]]] = {
+    'fast':     {'semgrep'},                    # toujours semgrep, pas de LLM
+    'standard': {'semgrep', 'sonarcloud'},      # LLM choisit parmi ces deux
+    'deep':     None,                           # LLM choisit parmi tous les scanners
+}
+
 
 class LLMSelector:
     """Utilise Ollama (ou OpenRouter en secours) pour choisir les scanners appropriés."""
-    
-    AVAILABLE_SCANNERS = {
-        'bandit': {
-            'name': 'Bandit',
-            'language': 'Python',
-            'description': 'Security linter for Python code. Finds common security issues.',
-            'frameworks': ['Django', 'Flask', 'FastAPI']
-        },
-        'eslint': {
-            'name': 'ESLint',
-            'language': 'JavaScript/TypeScript',
-            'description': 'Linter for JavaScript and TypeScript. Finds code quality and potential bugs.',
-            'frameworks': ['React', 'Vue', 'Angular', 'Node.js']
-        },
-        'sonarcloud': {
-            'name': 'SonarCloud',
-            'language': 'Multi-language',
-            'description': 'Cloud-based code quality and security platform. Supports 30+ languages.',
-            'frameworks': ['Multi-language support']
-        },
-        'semgrep': {
-            'name': 'Semgrep',
-            'language': 'Multi-language',
-            'description': 'Pattern-based static analysis tool. Supports 17+ languages.',
-            'frameworks': ['Multi-language support']
-        },
-        'cppcheck': {
-            'name': 'Cppcheck',
-            'language': 'C/C++',
-            'description': 'Static analysis tool for C/C++ code.',
-            'frameworks': []
-        },
-        'gosec': {
-            'name': 'Gosec',
-            'language': 'Go',
-            'description': 'Security scanner for Go code.',
-            'frameworks': []
-        },
-        'psalm': {
-            'name': 'Psalm',
-            'language': 'PHP',
-            'description': 'Static analysis tool for PHP code.',
-            'frameworks': ['Laravel', 'Symfony']
-        },
-        'brakeman': {
-            'name': 'Brakeman',
-            'language': 'Ruby',
-            'description': 'Security scanner for Ruby on Rails applications.',
-            'frameworks': ['Rails']
-        },
-        'clippy': {
-            'name': 'Clippy',
-            'language': 'Rust',
-            'description': 'Linter for Rust code.',
-            'frameworks': []
-        },
-        'detekt': {
-            'name': 'Detekt',
-            'language': 'Kotlin',
-            'description': 'Static analysis tool for Kotlin code.',
-            'frameworks': ['Android']
-        },
-    }
-    
+
     def __init__(self):
-        """Initialise le sélecteur Ollama/OpenRouter."""
         self.api_key = os.getenv('OPENROUTER_API_KEY')
         self.api_base = "https://openrouter.ai/api/v1"
         self.model = os.getenv('OPENROUTER_MODEL', 'mistral/mistral-7b-instruct')
-        
+
         if not self.api_key and not os.getenv("OLLAMA_API_URL"):
             logger.warning("Neither OPENROUTER_API_KEY nor OLLAMA_API_URL set in environment variables")
-    
+
     def suggest_scanners(
         self,
         languages: List[str],
         frameworks: Dict[str, List[str]],
         file_counts: Dict[str, int],
-        structure_summary: str
+        structure_summary: str,
+        scan_mode: str = 'standard',
     ) -> Dict:
         """
-        Utilise Ollama/OpenRouter pour suggérer les scanners appropriés.
-        
-        :param languages: Liste des langages détectés
-        :param frameworks: Dictionnaire des frameworks par langage
-        :param file_counts: Nombre de fichiers par langage
-        :param structure_summary: Résumé de la structure
-        :return: Dictionnaire contenant les scanners suggérés et le raisonnement
+        Suggests SAST scanners based on project analysis and scan mode.
+
+        scan_mode:
+          - 'fast'     → always semgrep, no LLM call
+          - 'standard' → LLM chooses from semgrep / sonarcloud only
+          - 'deep'     → LLM chooses from all specialized scanners
         """
-        # Construit le prompt
-        prompt = self._build_prompt(languages, frameworks, file_counts, structure_summary)
-        
+        allowed = _MODE_ALLOWED.get(scan_mode)
+
+        # Fast mode: bypass LLM entirely
+        if scan_mode == 'fast':
+            logger.info("Fast mode: skipping LLM, using Semgrep directly")
+            return {
+                'selected_scanners': ['semgrep'],
+                'reasoning': 'Fast mode — Semgrep covers 17+ languages with OWASP rules in under 2 minutes.',
+                'confidence': 1.0,
+                'source': 'mode:fast',
+            }
+
+        prompt = self._build_prompt(languages, frameworks, file_counts, structure_summary, allowed)
         try:
             response = self._call_llm(prompt)
-            return self._parse_response(response, languages, frameworks)
+            return self._parse_response(response, languages, frameworks, allowed)
         except Exception as e:
-            logger.error(f"Error calling LLM selector: {e}")
-            logger.info("Falling back to default scanner selection")
-            return self._fallback_selection(languages, frameworks)
-    
+            logger.error(f"LLM selector error: {e}")
+            return self._fallback_selection(languages, frameworks, allowed)
+
+    # ------------------------------------------------------------------ #
+    # Private helpers                                                       #
+    # ------------------------------------------------------------------ #
+
     def _build_prompt(
         self,
         languages: List[str],
         frameworks: Dict[str, List[str]],
         file_counts: Dict[str, int],
-        structure_summary: str
+        structure_summary: str,
+        allowed_scanners: Optional[Set[str]],
     ) -> str:
-        """
-        Construit le prompt pour le modèle.
-        
-        :return: Prompt pour l'IA
-        """
+        registry_subset = {
+            k: v for k, v in SCANNER_REGISTRY.items()
+            if allowed_scanners is None or k in allowed_scanners
+        }
         scanner_info = "\n".join([
-            f"- {name}: {info['language']} | {info['description']}"
-            for name, info in self.AVAILABLE_SCANNERS.items()
+            f"- {key}: {meta.name} ({meta.language}) | {meta.description}"
+            for key, meta in registry_subset.items()
         ])
-        
-        prompt = f"""You are a code security scanner selection expert. Based on the project analysis below, 
+
+        return f"""You are a code security scanner selection expert. Based on the project analysis below, \
 select the BEST suited security scanners from the available options.
 
 PROJECT ANALYSIS:
@@ -150,7 +108,7 @@ SELECTION CRITERIA:
 2. Prioritize dedicated scanners for specific languages
 3. Multi-language scanners (sonarcloud, semgrep) for diverse projects
 4. Include at least 1 scanner for security analysis
-5. Maximum 3 scanners for efficiency (avoid scanner overkill)
+5. Maximum 3 scanners for efficiency
 
 RESPONSE FORMAT:
 Return a JSON object with this exact structure:
@@ -160,196 +118,113 @@ Return a JSON object with this exact structure:
     "confidence": 0.95
 }}
 
-Think step-by-step:
-1. Identify primary language(s)
-2. Find scanners that support these languages
-3. Check for framework-specific scanners
-4. Select best combination for comprehensive coverage
-
 Return ONLY valid JSON, no markdown formatting."""
-        
-        return prompt
-    
+
     def _call_llm(self, prompt: str) -> str:
-        """
-        Fait un appel à l'API (Ollama ou OpenRouter) selon la variable LLM_PROVIDER.
-        
-        :param prompt: Prompt à envoyer
-        :return: Réponse du modèle
-        """
         provider = os.getenv("LLM_PROVIDER", "ollama").lower()
         ollama_url = os.getenv("OLLAMA_API_URL")
         ollama_model = os.getenv("OLLAMA_MODEL", "gemma4:31b-cloud")
-        
+
         if provider == "ollama":
             if not ollama_url:
-                logger.error("Configuration OLLAMA_API_URL manquante pour le fournisseur: ollama")
-                raise Exception("Missing OLLAMA configuration")
-                
-            logger.info(f"Calling Ollama at {ollama_url} with model: {ollama_model}")
+                raise Exception("Missing OLLAMA_API_URL configuration")
             data = {
                 "model": ollama_model,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
+                "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
-                "options": {
-                    "temperature": 0.3
-                }
+                "options": {"temperature": 0.3},
             }
-            try:
-                response = requests.post(ollama_url, json=data, timeout=45)
-                if response.status_code == 200:
-                    content = response.json()["message"]["content"].strip()
-                    logger.info("Ollama response received")
-                    logger.info(f"Connecté avec succès au LLM (Local/Ollama - {ollama_model})")
-                    return content
-                else:
-                    logger.error(f"Ollama failed with status: {response.status_code}")
-                    raise Exception(f"Ollama failed with status: {response.status_code}")
-            except Exception as e:
-                logger.error(f"Ollama error: {e}")
-                raise
+            response = requests.post(ollama_url, json=data, timeout=45)
+            if response.status_code == 200:
+                content = response.json()["message"]["content"].strip()
+                logger.info(f"Ollama response received (model={ollama_model})")
+                return content
+            raise Exception(f"Ollama failed with status: {response.status_code}")
 
         elif provider == "openrouter":
             if not self.api_key:
-                logger.error("Configuration OPENROUTER_API_KEY manquante pour le fournisseur: openrouter")
-                raise Exception("Missing OpenRouter configuration")
-
-            logger.info(f"Calling OpenRouter with model: {self.model}")
+                raise Exception("Missing OPENROUTER_API_KEY configuration")
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "HTTP-Referer": "https://github.com/vulnops",
-                "X-Title": "VulnOps Scanner Selection"
+                "X-Title": "VulnOps Scanner Selection",
             }
             data = {
                 "model": self.model,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
+                "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
                 "max_tokens": 500,
             }
-            
-            try:
-                response = requests.post(
-                    f"{self.api_base}/chat/completions",
-                    headers=headers,
-                    json=data,
-                    timeout=30
-                )
-                response.raise_for_status()
-                
-                result = response.json()
-                content = result.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
-                
-                logger.info(f"OpenRouter response received: {content[:100]}...")
-                logger.info(f"Connecté avec succès au LLM (OpenRouter - {self.model})")
-                return content
-                
-            except requests.exceptions.Timeout:
-                logger.error("OpenRouter API timeout")
-                raise
-            except requests.exceptions.RequestException as e:
-                logger.error(f"OpenRouter API error: {e}")
-                raise
-                
-        else:
-            logger.error(f"LLM_PROVIDER inconnu: {provider}")
-            raise Exception(f"Unknown LLM_PROVIDER: {provider}")
-    
+            response = requests.post(f"{self.api_base}/chat/completions", headers=headers, json=data, timeout=30)
+            response.raise_for_status()
+            content = response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+            logger.info(f"OpenRouter response received (model={self.model})")
+            return content
+
+        raise Exception(f"Unknown LLM_PROVIDER: {provider}")
+
     def _parse_response(
         self,
         response: str,
         languages: List[str],
-        frameworks: Dict[str, List[str]]
+        frameworks: Dict[str, List[str]],
+        allowed_scanners: Optional[Set[str]],
     ) -> Dict:
-        """
-        Parse la réponse du modèle.
-        
-        :param response: Réponse du modèle
-        :param languages: Langages détectés
-        :param frameworks: Frameworks détectés
-        :return: Dictionnaire avec scanners sélectionnés
-        """
         try:
-            # Essaie de parser JSON
             data = json.loads(response)
-            
             selected = data.get('selected_scanners', [])
             reasoning = data.get('reasoning', 'No explanation provided')
-            confidence = data.get('confidence', 0.5)
-            
-            # Valide que les scanners sélectionnés existent
-            valid_scanners = [s for s in selected if s in self.AVAILABLE_SCANNERS]
-            
-            if not valid_scanners:
-                logger.warning(f"No valid scanners in response: {selected}")
-                return self._fallback_selection(languages, frameworks)
-            
-            logger.info(f"Selected scanners: {valid_scanners} (confidence: {confidence})")
-            
+            confidence = float(data.get('confidence', 0.5))
+
+            valid = [
+                s for s in selected
+                if s in SCANNER_REGISTRY
+                and (allowed_scanners is None or s in allowed_scanners)
+            ]
+
+            if not valid:
+                logger.warning(f"No valid scanners in LLM response: {selected}")
+                return self._fallback_selection(languages, frameworks, allowed_scanners)
+
+            logger.info(f"LLM selected: {valid} (confidence={confidence:.2f})")
             return {
-                'selected_scanners': valid_scanners,
+                'selected_scanners': valid,
                 'reasoning': reasoning,
                 'confidence': confidence,
-                'source': 'ai'
+                'source': 'ai',
             }
-            
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse AI response as JSON: {response}")
-            return self._fallback_selection(languages, frameworks)
-    
+        except (json.JSONDecodeError, ValueError):
+            logger.error(f"Failed to parse LLM response: {response[:200]}")
+            return self._fallback_selection(languages, frameworks, allowed_scanners)
+
     def _fallback_selection(
         self,
         languages: List[str],
-        frameworks: Dict[str, List[str]]
+        frameworks: Dict[str, List[str]],
+        allowed_scanners: Optional[Set[str]],
     ) -> Dict:
-        """
-        Sélection par défaut si l'IA n'est pas disponible.
-        
-        :param languages: Langages détectés
-        :param frameworks: Frameworks détectés
-        :return: Dictionnaire avec scanners por défaut
-        """
         logger.info("Using fallback scanner selection")
-        
-        language_to_scanner = {
-            'python': 'bandit',
-            'javascript': 'eslint',
-            'typescript': 'eslint',
-            'java': 'sonarcloud',
-            'kotlin': 'detekt',
-            'go': 'gosec',
-            'rust': 'clippy',
-            'php': 'psalm',
-            'ruby': 'brakeman',
-            'cpp': 'cppcheck',
-            'c': 'cppcheck',
-        }
-        
         selected = []
-        
-        # Ajoute les scanners spécifiques au langage
+
         for lang in languages:
-            if lang in language_to_scanner:
-                scanner = language_to_scanner[lang]
-                if scanner not in selected:
+            scanner = LANGUAGE_TO_SCANNER.get(lang)
+            if scanner and scanner not in selected:
+                if allowed_scanners is None or scanner in allowed_scanners:
                     selected.append(scanner)
-        
-        # Ajoute SonarCloud si multi-langage
-        if len(languages) > 1 and 'sonarcloud' not in selected:
-            selected.append('sonarcloud')
-        
-        # Ajoute Semgrep pour analyse supplémentaire
-        if len(selected) == 0:
+
+        # Ensure at least one multi-language scanner
+        for fallback in ('semgrep', 'sonarcloud'):
+            if not selected:
+                if allowed_scanners is None or fallback in allowed_scanners:
+                    selected.append(fallback)
+                    break
+
+        if not selected:
             selected = ['semgrep']
-        elif 'semgrep' not in selected and len(selected) < 3:
-            selected.append('semgrep')
-        
+
         return {
-            'selected_scanners': selected[:3],  # Max 3 scanners
-            'reasoning': f"Auto-selected scanners for {', '.join(languages)}",
+            'selected_scanners': selected[:3],
+            'reasoning': f"Auto-selected for: {', '.join(languages)}",
             'confidence': 0.7,
-            'source': 'fallback'
+            'source': 'fallback',
         }

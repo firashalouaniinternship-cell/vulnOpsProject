@@ -3,10 +3,11 @@ Module pour détecter automatiquement les langages et frameworks d'un projet.
 Utilise la structure du projet clôné pour identifier les technologies utilisées.
 """
 import os
-import json
 import logging
 from pathlib import Path
-from typing import List, Dict, Set, Tuple
+from typing import List, Dict, Set
+
+from scanners.registry import LANGUAGE_TO_SCANNER
 
 logger = logging.getLogger(__name__)
 
@@ -255,40 +256,20 @@ class ProjectAnalyzer:
     
     def get_scan_candidates(self) -> List[str]:
         """
-        Retourne les scanners candidats basé sur les langages/frameworks détectés.
-        
-        :return: Liste des scanners candidats
+        Retourne les scanners candidats basé sur les langages détectés.
+        Utilise le registre central comme source de vérité.
         """
         candidates = []
-        
-        language_to_scanner = {
-            'python': 'bandit',
-            'javascript': 'eslint',
-            'typescript': 'eslint',
-            'java': 'sonarcloud',
-            'kotlin': 'detekt',
-            'go': 'gosec',
-            'rust': 'clippy',
-            'php': 'psalm',
-            'ruby': 'brakeman',
-            'cpp': 'cppcheck',
-            'c': 'cppcheck',
-        }
-        
-        # Ajoute les scanners basé sur les langages détectés
+
         for language in self.detected_languages:
-            if language in language_to_scanner:
-                apps.scans = language_to_scanner[language]
-                if apps.scans not in candidates:
-                    candidates.append(apps.scans)
-        
-        # SonarCloud peut analyser plusieurs langages
-        if len(self.detected_languages) > 1:
-            if 'sonarcloud' not in candidates:
-                candidates.append('sonarcloud')
-        
-        # Semgrep peut aussi analyser plusieurs langages
+            scanner = LANGUAGE_TO_SCANNER.get(language)
+            if scanner and scanner not in candidates:
+                candidates.append(scanner)
+
+        if len(self.detected_languages) > 1 and 'sonarcloud' not in candidates:
+            candidates.append('sonarcloud')
+
         if 'semgrep' not in candidates:
             candidates.append('semgrep')
-        
+
         return candidates
