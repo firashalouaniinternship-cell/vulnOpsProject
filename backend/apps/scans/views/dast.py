@@ -17,7 +17,7 @@ from scanners.dast.zaproxy_runner import (
     stop_and_cleanup_container
 )
 from core.utils.repo_utils import clone_repo
-from integrations.defectdojo.mapper import DojoMapper
+
 from rag.llm_scoring import get_direct_llm_score
 
 logger = logging.getLogger(__name__)
@@ -160,11 +160,7 @@ def trigger_dast_scan(request):
         
         Vulnerability.objects.bulk_create(vuln_objects)
 
-        try:
-            if result.get('raw'):
-                DojoMapper.save_and_push_to_dojo(result['raw'], 'zap')
-        except Exception as e:
-            logger.error(f"Error triggering DefectDojo integration in DAST scan: {e}")
+
 
         metrics = {
             'total_issues': len(alerts),
@@ -332,11 +328,7 @@ def trigger_auto_build_dast_scan(request):
             ))
         Vulnerability.objects.bulk_create(vuln_objects)
 
-        try:
-            if result.get('raw'):
-                DojoMapper.save_and_push_to_dojo(result['raw'], 'zap')
-        except Exception as e:
-            logger.error(f"Error triggering DefectDojo integration in Auto-DAST scan: {e}")
+
 
         return Response({
             'scan_id': scan.id,

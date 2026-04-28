@@ -14,24 +14,39 @@ class RAGService:
         self.vector_db = self.ingestion.get_vector_db()
 
     def invoke(self, input_data):
-        """Main entry point for getting a recommendation using real retrieval."""
+        """Main entry point for getting an enriched security recommendation."""
         query = input_data.get("query", "")
-        
+
         system_prompt = (
-            "You are an elite Security Architect specializing in the OWASP Top 10 for LLMs. "
-            "Analyze the vulnerability and provide a structured mitigation recommendation. "
-            "Use the provided context from security documentation to back your advice. "
-            "CRITICAL: Always identify which OWASP Top 10 for LLMs category (e.g., LLM01, LLM02) applies. "
-            "Use Markdown formatting."
+            "You are a Senior Application Security Engineer specialized in code vulnerability remediation. "
+            "You analyze findings produced by SAST scanners (Bandit, Semgrep, ESLint, GoSec, Brakeman, etc.), "
+            "SCA tools (OWASP Dependency-Check), container scanners (Trivy), and DAST tools (OWASP ZAP). "
+            "Use the OWASP Top 10 2021, OWASP Cheat Sheets, and CWE knowledge provided as context to give "
+            "precise, actionable remediation advice grounded in official standards. "
+            "You MUST follow this exact structure:\n\n"
+            "### Analyse de la Vulnérabilité\n"
+            "**Catégorie OWASP / CWE :** (Identifiez la catégorie OWASP Top 10 2021 (ex: A03 - Injection) "
+            "et le CWE correspondant (ex: CWE-89). Expliquez pourquoi cette faille est dangereuse.)\n"
+            "**Vecteur d'attaque :** (Décrivez concrètement comment un attaquant exploiterait cette faille "
+            "dans le contexte du code signalé par le scanner.)\n\n"
+            "### Remédiation\n"
+            "**Bonnes pratiques :** (Listez les principes de secure coding à appliquer selon l'OWASP Cheat Sheet Series.)\n"
+            "**Exemple de code corrigé :** (Fournissez un extrait de code sécurisé, dans le langage du scanner "
+            "qui a détecté la faille si possible.)\n"
+            "**Références :** (Citez les sources OWASP/CWE pertinentes.)\n\n"
+            "Répondez en français. Utilisez le format Markdown. Soyez précis et pédagogique."
         )
         
         try:
-            # Rechauffer la DB et chercher les documents pertinents
-            logger.info(f"Performing similarity search for: {query[:50]}...")
-            docs = self.vector_db.similarity_search(query, k=3)
+            # Recherche de documents pertinents (k=5 pour plus de contexte)
+            logger.info(f"Performing deep security similarity search for: {query[:50]}...")
+            docs = self.vector_db.similarity_search(query, k=5)
             
             context_text = "\n\n".join([doc.page_content for doc in docs])
-            full_user_prompt = f"CONTEXT FROM DOCUMENTATION:\n{context_text}\n\nUSER QUERY:\n{query}"
+            full_user_prompt = (
+                f"CONTEXTE DE SÉCURITÉ (OWASP/CWE/BEST PRACTICES):\n{context_text}\n\n"
+                f"VULNÉRABILITÉ DÉTECTÉE À ANALYSER :\n{query}"
+            )
             
             result_text = LLMConnector.call_llm(system_prompt, full_user_prompt)
             
@@ -40,11 +55,12 @@ class RAGService:
             
             return {
                 "result": result_text,
-                "source_documents": docs
+                "source_documents": [doc.metadata for doc in docs] # Return metadata instead of full docs for efficiency
             }
         except Exception as e:
-            logger.error(f"RAG invocation failed: {e}")
-            return {"result": f"Request failed: {str(e)}", "source_documents": []}
+            logger.error(f"RAG enriched invocation failed: {e}")
+            return {"result": f"Enrichment failed: {str(e)}", "source_documents": []}
+
 
     def score_vulnerability(self, input_data):
         """Analyzes and priority-scores a vulnerability."""

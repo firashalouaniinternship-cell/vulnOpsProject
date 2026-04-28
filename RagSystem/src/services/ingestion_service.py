@@ -2,7 +2,7 @@ import os
 import logging
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from ..core.config import Config
 
@@ -12,11 +12,11 @@ class IngestionService:
     """Service to ingest documents into the ChromaDB vector store."""
     
     def __init__(self):
-        self.embedding_model = OpenAIEmbeddings(
-            model=Config.OPENROUTER_EMBEDDING_MODEL,
-            openai_api_key=Config.OPENROUTER_API_KEY,
-            openai_api_base="https://openrouter.ai/api/v1"
+        # Using a reliable local embedding model (free, no API key needed)
+        self.embedding_model = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
+
         self.db_dir = Config.CHROMA_DB_DIR
         self.source_dir = Config.SOURCE_DOCS_DIR
 
@@ -28,12 +28,14 @@ class IngestionService:
             return False
 
         logger.info(f"Loading documents from {self.source_dir}...")
-        
-        # Support PDF and Text files
+
+        # Support PDF, plain text, and Markdown (OWASP Cheat Sheets are native Markdown)
         pdf_loader = DirectoryLoader(self.source_dir, glob="*.pdf", loader_cls=PyPDFLoader)
-        txt_loader = DirectoryLoader(self.source_dir, glob="*.txt", loader_cls=TextLoader)
-        
-        documents = pdf_loader.load() + txt_loader.load()
+        txt_loader = DirectoryLoader(self.source_dir, glob="*.txt", loader_cls=TextLoader, loader_kwargs={'encoding': 'utf-8'})
+        md_loader  = DirectoryLoader(self.source_dir, glob="*.md",  loader_cls=TextLoader, loader_kwargs={'encoding': 'utf-8'})
+
+        documents = pdf_loader.load() + txt_loader.load() + md_loader.load()
+
         
         if not documents:
             logger.warning("No documents found to ingest.")

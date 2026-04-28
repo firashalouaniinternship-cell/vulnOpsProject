@@ -25,7 +25,7 @@ def trigger_test_scan():
             print("Scan triggered successfully!")
             print(f"Scan ID: {data.get('scan_id')}")
             print(f"Issues Found: {data.get('metrics', {}).get('total_issues', 0)}")
-            print("Check DefectDojo for results.")
+            print("Check results on dashboard.")
         else:
             print(f"Error: {response.text}")
     except Exception as e:

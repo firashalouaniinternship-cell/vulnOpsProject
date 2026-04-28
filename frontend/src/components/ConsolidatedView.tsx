@@ -94,18 +94,7 @@ const ConsolidatedView: React.FC<ConsolidatedViewProps> = ({ vulnerabilities }) 
               Cette vue fusionne les résultats de tous les scanners actifs et élimine les doublons pour vous offrir une vision claire de la posture de sécurité de votre projet.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <a 
-              href="http://localhost:8080" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="btn-outline"
-              style={{ padding: '8px 16px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', background: 'rgba(255,255,255,0.05)', color: 'white', borderRadius: '6px', border: '1px solid var(--border)' }}
-            >
-              <ExternalLink size={14} />
-              Détails DefectDojo
-            </a>
-          </div>
+
         </div>
 
         {/* Global Stats Cards */}

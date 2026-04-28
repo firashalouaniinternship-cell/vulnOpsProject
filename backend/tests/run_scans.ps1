@@ -1,5 +1,5 @@
 # Script d'Automatisation DevSecOps (PowerShell)
-# Ce script lance les outils de sécurité et envoie les rapports vers DefectDojo.
+
 
 echo "[*] Création du dossier reports..."
 if (!(Test-Path -Path "reports")) {
@@ -19,7 +19,4 @@ echo "[*] Lancement de OWASP ZAP (DAST)..."
 docker run -v ${PWD}:/zap/wrk/:rw -t owasp/zap2docker-stable zap-baseline.py -t http://localhost:5173 -J zap.json
 Move-Item -Path "zap.json" -Destination "reports/zap.json" -Force
 
-echo "[*] Envoi des rapports vers DefectDojo..."
-python scripts/dojo_upload.py
-
-echo "[+] Terminé ! Consultez votre dashboard sur http://localhost:8080"
+echo "[+] Terminé !"

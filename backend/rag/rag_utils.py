@@ -24,7 +24,7 @@ def get_vulnerability_recommendation(test_name, issue_text, cwe=None, code_snipp
         query += f" CWE: {cwe}."
     if code_snippet:
         query += f"\nCode Context:\n```\n{code_snippet}\n```"
-    query += "\n\nProvide a concise mitigation recommendation and mention the relevant OWASP Top 10 for LLMs category if applicable."
+    query += "\n\nProvide an enriched security analysis following the structured format (Definition/CWE, Attack Example, Best Practices, Code Correction)."
 
     # Using a small helper snippet to run the chain and print JSON
     helper_code = f"""
@@ -36,10 +36,11 @@ chain = get_rag_chain()
 result = chain.invoke({{"query": {json.dumps(query)}}})
 output = {{
     "result": result["result"],
-    "sources": [doc.metadata.get('page', 0) + 1 for doc in result["source_documents"]]
+    "sources": [meta.get('page', 0) + 1 for meta in result["source_documents"]]
 }}
 print(json.dumps(output))
 """
+
     
     # Prepare environment with stabilization flags
     env = os.environ.copy()

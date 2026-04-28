@@ -23,7 +23,7 @@ from scanners.sast.detekt_runner import run_full_detekt_scan
 from scanners.sca.dependency_check_runner import run_dependency_check, parse_dependency_check_results
 from scanners.container.trivy_runner import run_trivy, parse_trivy_results
 from rag.llm_scoring import get_direct_llm_score
-from integrations.defectdojo.mapper import DojoMapper
+
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +154,7 @@ def auto_trigger_scan(request):
             'detekt': run_full_detekt_scan,
         }
         
-        dojo_uploads = []
+
 
         for scanner_type in suggested:
             if scanner_type not in scanner_functions:
@@ -372,23 +372,7 @@ def auto_trigger_scan(request):
                     
                     Vulnerability.objects.bulk_create(vuln_objects)
 
-                    dojo_uploads.append({
-                        'type': 'sast',
-                        'data': result.get('raw_output'),
-                        'apps.scans': scanner_type
-                    })
-                    if run_sca and 'dc_result' in locals() and dc_result.get('success'):
-                        dojo_uploads.append({
-                            'type': 'sca',
-                            'data': json.dumps(dc_result['data']),
-                            'apps.scans': 'dependency-check'
-                        })
-                    if run_container and 'trivy_result' in locals() and trivy_result.get('success'):
-                        dojo_uploads.append({
-                            'type': 'container',
-                            'data': json.dumps(trivy_result['data']),
-                            'apps.scans': 'trivy'
-                        })
+
 
                     scan_results.append({
                         'apps.scans': scanner_type,
@@ -410,9 +394,7 @@ def auto_trigger_scan(request):
                     'scan_id': scan.id
                 })
         
-        if dojo_uploads:
-            # Envoi Dojo différé
-            pass
+
         
         return Response({
             'success': True,

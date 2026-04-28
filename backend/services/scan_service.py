@@ -6,8 +6,7 @@ from django.utils import timezone
 from apps.scans.models import ScanResult, Vulnerability
 from services.orchestrator_service import OrchestratorService
 from rag.llm_scoring import get_direct_llm_score
-from integrations.defectdojo.mapper import DojoMapper
-# from integrations.defectdojo.client import DefectDojoClient # To be created
+
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +100,6 @@ class ScanService:
             
             Vulnerability.objects.bulk_create(vuln_objects)
             
-            # 3. Push vers DefectDojo
-            # logic here...
             
             return True
         except Exception as e:
