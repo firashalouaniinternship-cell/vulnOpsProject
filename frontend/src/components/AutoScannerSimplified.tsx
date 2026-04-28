@@ -23,6 +23,7 @@ interface AutoScannerSimplifiedProps {
   repoLanguage?: string;
   selectedPaths?: string[];
   branch?: string;
+  scanMode?: 'fast' | 'standard' | 'deep';
 }
 
 interface ScannerInfo {
@@ -115,6 +116,7 @@ export function AutoScannerSimplified({
   repoLanguage,
   selectedPaths = [],
   branch,
+  scanMode = 'standard',
 }: AutoScannerSimplifiedProps) {
   const { selectScanners, autoScan, loading, error, progress } = useAutoScannerSelection();
 
@@ -125,12 +127,19 @@ export function AutoScannerSimplified({
   const [showDetails, setShowDetails] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [currentPhase, setCurrentPhase] = useState<string | null>(null);
+  const [activeScanMode, setActiveScanMode] = useState<'fast' | 'standard' | 'deep'>(scanMode as 'fast' | 'standard' | 'deep');
   const [enabledScanners, setEnabledScanners] = useState({
     sast: false,
     sca: false,
     container: false,
     dast: false
   });
+
+  const SCAN_MODES: { id: 'fast' | 'standard' | 'deep'; label: string; desc: string; color: string }[] = [
+    { id: 'fast',     label: '⚡ Fast',     desc: 'Semgrep uniquement, < 2 min',            color: '#10b981' },
+    { id: 'standard', label: '🔍 Standard', desc: 'LLM choisit parmi Semgrep / SonarCloud', color: '#6366f1' },
+    { id: 'deep',     label: '🧠 Deep',     desc: 'LLM choisit parmi tous les scanners',     color: '#f59e0b' },
+  ];
 
 
 
@@ -194,7 +203,8 @@ export function AutoScannerSimplified({
           enabledScanners.sast,
           enabledScanners.container,
           selectedPaths,
-          branch
+          branch,
+          activeScanMode
         );
 
           if (result && (result as any).scan_results && (result as any).scan_results.length > 0) {
@@ -371,6 +381,48 @@ export function AutoScannerSimplified({
           <p className="auto-detected">🤖 Auto-Detected Scanner:</p>
         </div>
 
+        {/* Scan Mode Selector */}
+        <div style={{
+          background: 'rgba(255, 255, 255, 0.03)',
+          border: '1px solid var(--border)',
+          borderRadius: '10px',
+          padding: '12px',
+          marginBottom: '8px'
+        }}>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '10px' }}>
+            Mode de scan
+          </span>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {SCAN_MODES.map(mode => (
+              <button
+                key={mode.id}
+                onClick={() => setActiveScanMode(mode.id)}
+                title={mode.desc}
+                style={{
+                  flex: 1,
+                  padding: '8px 4px',
+                  border: '1px solid',
+                  borderColor: activeScanMode === mode.id ? mode.color : 'var(--border)',
+                  borderRadius: '6px',
+                  background: activeScanMode === mode.id ? `${mode.color}18` : 'transparent',
+                  color: activeScanMode === mode.id ? mode.color : 'var(--text-dim)',
+                  fontSize: '11px',
+                  fontWeight: activeScanMode === mode.id ? 700 : 400,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  textAlign: 'center',
+                  lineHeight: 1.4,
+                }}
+              >
+                {mode.label}
+                <div style={{ fontSize: '9px', opacity: 0.7, marginTop: '2px', fontWeight: 400, color: 'inherit' }}>
+                  {mode.desc}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Scan Type Selection Area */}
         <div style={{
           background: 'rgba(255, 255, 255, 0.03)',
@@ -394,7 +446,7 @@ export function AutoScannerSimplified({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {[
               { id: 'sast', label: 'SAST (Static Analysis)', icon: <Shield size={14} />, desc: `Analysis with ${scannerInfo.name}` },
-              { id: 'sca', label: 'SCA (Dependency Scan)', icon: <Box size={14} />, desc: 'Detect libs with Dependency-Check' },
+              { id: 'sca', label: 'SCA (Dependency Scan)', icon: <Box size={14} />, desc: 'Detect vulnerable libs with Trivy' },
               { id: 'container', label: 'Container Scanning', icon: <Shield size={14} />, desc: 'Scan with Trivy' },
               { id: 'dast', label: 'DAST (Dynamic Analysis)', icon: <Globe size={14} />, desc: 'Real-time test (requires Docker)' },
             ].map(type => (

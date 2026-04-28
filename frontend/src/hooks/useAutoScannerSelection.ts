@@ -8,6 +8,8 @@ import api, { endpoints } from '../api/client';
 
 interface AutoSelectResult {
   success: boolean;
+  repo_full_name: string;
+  scan_mode: string;
   analysis: {
     languages: string[];
     frameworks: Record<string, string[]>;
@@ -17,12 +19,26 @@ interface AutoSelectResult {
   suggested_scanners: string[];
   reasoning: string;
   confidence: number;
-  source: 'openrouter' | 'fallback';
+  source: 'ai' | 'fallback' | 'mode:fast';
 }
 
 interface AutoScanResult {
   success: boolean;
-  auto_selected_scanners: string[];
+  repo_full_name: string;
+  scan_mode: string;
+  scan_types: {
+    sast: boolean;
+    sca: boolean;
+    container: boolean;
+    dast: boolean;
+  };
+  selected_sast_scanners: string[];
+  detection: {
+    source: string;
+    reasoning: string;
+    confidence: number;
+    analysis?: Record<string, any>;
+  };
   scan_results: Array<{
     scanner: string;
     status: 'COMPLETED' | 'FAILED' | 'RUNNING';
@@ -30,7 +46,6 @@ interface AutoScanResult {
     error?: string;
     scan_id: number;
   }>;
-  total_scans: number;
 }
 
 interface AnalyzeResult {
@@ -66,7 +81,8 @@ interface UseAutoScannerSelectionReturn {
     runSast?: boolean,
     runContainer?: boolean,
     targets?: string[],
-    branch?: string
+    branch?: string,
+    scanMode?: 'fast' | 'standard' | 'deep'
   ) => Promise<AutoScanResult>;
   
   analyzeProject: (projectPath: string) => Promise<AnalyzeResult>;
@@ -128,7 +144,8 @@ export function useAutoScannerSelection(): UseAutoScannerSelectionReturn {
     runSast: boolean = true,
     runContainer: boolean = false,
     targets: string[] = [],
-    branch?: string
+    branch?: string,
+    scanMode: 'fast' | 'standard' | 'deep' = 'standard'
   ): Promise<AutoScanResult> => {
     setLoading(true);
     setError(null);
@@ -143,8 +160,9 @@ export function useAutoScannerSelection(): UseAutoScannerSelectionReturn {
           repo_name: repoName,
           repo_owner: repoOwner,
           custom_token: customToken,
-          run_sca: runSca,
+          scan_mode: scanMode,
           run_sast: runSast,
+          run_sca: runSca,
           run_container: runContainer,
           targets: targets,
           branch: branch,
