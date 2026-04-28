@@ -133,36 +133,40 @@ class AutoScannerOrchestrator:
         :raises: Exception si le clonage échoue
         """
         # Modifie l'URL pour inclure le token (nécessaire pour accéder aux repos privés)
+        final_url = clone_url
         if github_token and 'https://github.com/' in clone_url:
-            clone_url = clone_url.replace(
+            final_url = clone_url.replace(
                 'https://github.com/',
                 f'https://{github_token}@github.com/'
             )
         
-            # Clone le dépôt (shallow clone pour performance)
-            logger.info(f"Cloning from {clone_url} (shallow clone, branch={branch or 'main'})")
-            
-            clone_kwargs = {
-                'depth': 1,
-                'single_branch': True,
-            }
-            if branch:
-                clone_kwargs['branch'] = branch
+        # Clone le dépôt (shallow clone pour performance)
+        logger.info(f"Cloning from {final_url.replace(github_token, '***') if github_token else final_url} (shallow clone, branch={branch or 'main/master'})")
+        
+        clone_kwargs = {
+            'depth': 1,
+            'single_branch': True,
+        }
+        if branch:
+            clone_kwargs['branch'] = branch
+        else:
+            # On essaiera master si main échoue
+            clone_kwargs['branch'] = 'main'
+
+        try:
+            repo = Repo.clone_from(final_url, dest_dir, **clone_kwargs)
+        except GitCommandError as e:
+            if not branch and 'main' in str(e).lower():
+                logger.info("'main' branch not found, trying 'master'")
+                clone_kwargs['branch'] = 'master'
+                repo = Repo.clone_from(final_url, dest_dir, **clone_kwargs)
             else:
-                clone_kwargs['branch'] = 'main'
+                logger.error(f"Git clone failed: {e}")
+                raise Exception(f"Failed to clone repository: {str(e)}")
 
-            try:
-                repo = Repo.clone_from(clone_url, dest_dir, **clone_kwargs)
-            except GitCommandError as e:
-                if not branch and 'main' in str(e).lower():
-                    logger.info("'main' branch not found, trying 'master'")
-                    clone_kwargs['branch'] = 'master'
-                    repo = Repo.clone_from(clone_url, dest_dir, **clone_kwargs)
-                else:
-                    raise
+        logger.info(f"Repository cloned successfully to {dest_dir}")
+        return Path(dest_dir)
 
-            logger.info(f"Repository cloned successfully to {dest_dir}")
-            return Path(dest_dir)
     
     def analyze_existing_project(self, project_path: str) -> Dict:
         """

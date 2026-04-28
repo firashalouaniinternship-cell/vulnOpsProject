@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 def _build_patch_prompt(vuln) -> str:
+    rag_context = ""
+    if vuln.rag_recommendation:
+        rag_context = f"\nRECOMMANDATION SÉCURITÉ (OWASP/CWE):\n{vuln.rag_recommendation}\n"
+
     return f"""You are an expert Secure Code Developer.
 A security scanner reported the following vulnerability:
 
@@ -24,13 +28,13 @@ Description   : {vuln.issue_text}
 Severity      : {vuln.severity}
 CWE           : {vuln.cwe or 'N/A'}
 File          : {vuln.filename} (line {vuln.line_number})
-
+{rag_context}
 Vulnerable code:
 ```
 {vuln.code_snippet or '# Code snippet not available'}
 ```
 
-Generate a precise, minimal remediation patch.
+Generate a precise, minimal remediation patch following the provided recommendation if available.
 Return ONLY a valid JSON object with this exact structure (no markdown, no explanation outside JSON):
 {{
   "file_path": "{vuln.filename}",
@@ -38,6 +42,7 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
   "code_diff": "Show the fixed version of the vulnerable code with --- old / +++ new markers"
 }}
 """
+
 
 
 def _call_llm(prompt: str) -> str:

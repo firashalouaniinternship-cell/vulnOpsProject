@@ -203,6 +203,32 @@ class RAGService:
             logger.error(f"RAG invoke failed: {e}", exc_info=True)
             return {"result": f"Erreur RAG: {str(e)}", "source_documents": [], "sources": []}
 
+    def chat_vulnerability(self, vulnerability_details: dict, message: str, chat_history: list = None) -> str:
+        """
+        Permet de discuter d'une vulnérabilité avec le contexte du code et du RAG.
+        """
+        chat_history = chat_history or []
+        
+        system_prompt = (
+            "Vous are an expert Security Engineer. You are helping a developer understand and fix a vulnerability.\n"
+            "CONTEXT OF THE FINDING:\n"
+            f"- Test: {vulnerability_details.get('test_name')}\n"
+            f"- Severity: {vulnerability_details.get('severity')}\n"
+            f"- File: {vulnerability_details.get('filename')}\n"
+            f"- Code snippet: {vulnerability_details.get('code_snippet')}\n\n"
+            "Answer the user's questions accurately and suggest code improvements. Respond in French."
+        )
+        
+        # Build history prompt
+        history_text = ""
+        for msg in chat_history:
+            role = "USER" if msg.get('role') == 'user' else "ASSISTANT"
+            history_text += f"{role}: {msg.get('content')}\n"
+            
+        user_prompt = f"{history_text}USER: {message}"
+        
+        return self._call_llm(system_prompt, user_prompt)
+
     def score_vulnerability(self, input_data: dict) -> dict:
         """
         Returns { score: float, reasoning: str } for a vulnerability.

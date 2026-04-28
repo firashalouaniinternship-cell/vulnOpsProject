@@ -67,3 +67,41 @@ def get_vulnerability_recommendation(request, pk):
         **result,
         'cached': False
     }, status=status.HTTP_200_OK)
+from rag.rag_service import rag_service
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def chat_on_vulnerability(request, pk):
+    """
+    Endpoint pour discuter interactivement d'une vulnérabilité.
+    Attends: { "message": "...", "history": [...] }
+    """
+    user_filter = request.user if request.user.is_authenticated else None
+    try:
+        vuln = Vulnerability.objects.get(pk=pk, scan__user=user_filter)
+    except Vulnerability.DoesNotExist:
+        return Response({'error': 'Vulnérabilité non trouvée'}, status=status.HTTP_404_NOT_FOUND)
+
+    message = request.data.get('message', '')
+    history = request.data.get('history', [])
+
+    if not message:
+        return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    vulnerability_details = {
+        'test_name': vuln.test_name,
+        'severity': vuln.severity,
+        'filename': vuln.filename,
+        'code_snippet': vuln.code_snippet
+    }
+
+    try:
+        response_text = rag_service.chat_vulnerability(
+            vulnerability_details=vulnerability_details,
+            message=message,
+            chat_history=history
+        )
+        return Response({'reply': response_text}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f"Chat failed for vuln {pk}: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

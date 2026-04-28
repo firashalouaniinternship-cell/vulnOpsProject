@@ -243,7 +243,7 @@ def auto_trigger_scan(request):
                     scan.save()
                     
                     scan_results.append({
-                        'apps.scans': scanner_type,
+                        'scanner': scanner_type,
                         'status': 'FAILED',
                         'error': error_msg,
                         'scan_id': scan.id
@@ -375,7 +375,7 @@ def auto_trigger_scan(request):
 
 
                     scan_results.append({
-                        'apps.scans': scanner_type,
+                        'scanner': scanner_type,
                         'status': 'COMPLETED',
                         'metrics': {'total': total_issues},
                         'scan_id': scan.id
@@ -388,7 +388,7 @@ def auto_trigger_scan(request):
                 scan.save()
                 
                 scan_results.append({
-                    'apps.scans': scanner_type,
+                    'scanner': scanner_type,
                     'status': 'FAILED',
                     'error': error_msg,
                     'scan_id': scan.id

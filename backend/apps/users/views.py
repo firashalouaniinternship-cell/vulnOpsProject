@@ -93,18 +93,13 @@ def github_callback(request):
         timeout=20
     )
 
-    print(f"DEBUG: Status Code: {token_response.status_code}")
-    print(f"DEBUG: Response Headers: {token_response.headers}")
-    print(f"DEBUG: Response Body: '{token_response.text}'")
-
     try:
         token_data = token_response.json()
     except Exception as e:
-        print(f"DEBUG: JSONDecodeError details: {e}")
         # Fallback if GitHub returns query parameters instead of JSON
         import urllib.parse
         token_data = dict(urllib.parse.parse_qsl(token_response.text))
-        print(f"DEBUG: Parsed as query string: {token_data}")
+
 
     access_token = token_data.get('access_token')
 

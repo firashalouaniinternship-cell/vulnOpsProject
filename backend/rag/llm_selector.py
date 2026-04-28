@@ -202,7 +202,7 @@ Return ONLY valid JSON, no markdown formatting."""
                 if response.status_code == 200:
                     content = response.json()["message"]["content"].strip()
                     logger.info("Ollama response received")
-                    print(f"\n✅ Connecté avec succès au LLM (Local/Ollama - {ollama_model}) !\n")
+                    logger.info(f"Connecté avec succès au LLM (Local/Ollama - {ollama_model})")
                     return content
                 else:
                     logger.error(f"Ollama failed with status: {response.status_code}")
@@ -244,7 +244,7 @@ Return ONLY valid JSON, no markdown formatting."""
                 content = result.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
                 
                 logger.info(f"OpenRouter response received: {content[:100]}...")
-                print(f"\n✅ Connecté avec succès au LLM (OpenRouter - {self.model}) !\n")
+                logger.info(f"Connecté avec succès au LLM (OpenRouter - {self.model})")
                 return content
                 
             except requests.exceptions.Timeout:

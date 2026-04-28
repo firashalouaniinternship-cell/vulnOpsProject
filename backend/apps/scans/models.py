@@ -93,6 +93,7 @@ class Vulnerability(models.Model):
     code_snippet = models.TextField(blank=True)      # Code source concerné
     cwe = models.CharField(max_length=50, blank=True)  # CWE-ID
     llm_score = models.FloatField(default=0.0)       # Score AI [0-1]
+    risk_score = models.FloatField(default=0.0)      # Score de risque dynamique [0-1]
     llm_explanation = models.TextField(blank=True)   # Justification du score
     is_sca = models.BooleanField(default=False)
     is_container = models.BooleanField(default=False)

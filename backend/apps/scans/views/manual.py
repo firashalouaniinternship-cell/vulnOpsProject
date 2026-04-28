@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 @permission_classes([AllowAny])
 def trigger_scan(request):
     """
-    Lance un scan de manire asynchrone via Celery.
+    Lance un scan de manière asynchrone via Celery.
     """
     repo_full_name = request.data.get('repo_full_name', '')
     clone_url = request.data.get('clone_url', '')
@@ -28,7 +28,7 @@ def trigger_scan(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Rcupration du token
+    # Récupération du token
     custom_token = request.data.get('custom_token')
     access_token = custom_token
     if not access_token and request.user.is_authenticated:
@@ -60,5 +60,6 @@ def trigger_scan(request):
     return Response({
         'scan_id': scan.id,
         'status': 'PENDING',
-        'message': 'Scan lanc avec succs en arrire-plan.'
+        'message': 'Scan lancé avec succès en arrière-plan.'
     }, status=status.HTTP_202_ACCEPTED)
+

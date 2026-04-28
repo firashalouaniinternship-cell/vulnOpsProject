@@ -63,7 +63,7 @@ def get_direct_llm_score(test_name, issue_text, severity, context_summary, code_
                      logger.warning("Réponse Ollama vide")
                      return {"score": 0.5, "reasoning": "Scoring failed: Empty response"}
                 
-                print(f"\n✅ Connecté avec succès au LLM (Local/Ollama - {ollama_model}) pour l'analyse de vulnérabilité !\n")
+                logger.info(f"Connecté avec succès au LLM (Local/Ollama - {ollama_model})")
                 
                 cleaned_result = result.strip()
                 if cleaned_result.startswith("```"):
@@ -124,7 +124,7 @@ def get_direct_llm_score(test_name, issue_text, severity, context_summary, code_
                 if response.status_code == 200:
                     result = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
                     
-                    print(f"\n✅ Connecté avec succès au LLM (OpenRouter - {openrouter_model}) pour l'analyse de vulnérabilité !\n")
+                    logger.info(f"Connecté avec succès au LLM (OpenRouter - {openrouter_model})")
                     
                     cleaned_result = result.strip()
                     if cleaned_result.startswith("```"):
@@ -159,5 +159,4 @@ def get_direct_llm_score(test_name, issue_text, severity, context_summary, code_
         logger.error(f"LLM_PROVIDER inconnu: {provider}")
         return {"score": 0.5, "reasoning": f"Scoring failed: Unknown LLM_PROVIDER {provider}"}
 
-    # Fallback technique si le flux normal échoue silencieusement
-    return {"score": 0.5, "reasoning": "Scoring failed: Technical connection issue"}
+

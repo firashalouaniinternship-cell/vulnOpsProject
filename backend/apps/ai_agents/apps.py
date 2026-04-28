@@ -2,4 +2,4 @@ from django.apps import AppConfig
 
 
 class AiAgentsConfig(AppConfig):
-    name = 'ai_agents'
+    name = 'apps.ai_agents'

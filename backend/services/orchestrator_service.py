@@ -12,11 +12,11 @@ class OrchestratorService:
     @staticmethod
     def run_full_scan(target_path: str, scanners: List[str], **kwargs) -> List[Dict]:
         """
-        Orchestre lexcution de plusieurs scanners sur une cible.
+        Orchestre l'exécution de plusieurs scanners sur une cible.
         """
         all_findings = []
         
-        # Mapping simple pour lexemple -  affiner avec une registry
+        # Mapping simple pour l'exemple - à affiner avec une registry
         runner_map = {
             'bandit': BanditRunner,
             'dependency-check': DependencyCheckRunner,
@@ -35,12 +35,13 @@ class OrchestratorService:
                 runner = runner_class()
                 findings = runner.run(target_path, **kwargs)
                 
-                # Ajout de mtadonnes sur la source
+                # Ajout de métadonnées sur la source
                 for f in findings:
                     f['scanner_source'] = scanner_name
                 
                 all_findings.extend(findings)
             except Exception as e:
-                logger.error(f"Erreur lors de lexcution de {scanner_name}: {str(e)}")
+                logger.error(f"Erreur lors de l'exécution de {scanner_name}: {str(e)}")
         
         return all_findings
+
