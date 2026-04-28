@@ -10,6 +10,7 @@ urlpatterns = [
     path('auto-scan/', views.auto_trigger_scan, name='auto-trigger-scan'),
     path('analyze/', views.analyze_project, name='analyze-project'),
     path('vulnerability/<int:pk>/recommendation/', views.get_vulnerability_recommendation, name='vulnerability-recommendation'),
+    path('vulnerability/<int:pk>/patch/', views.generate_patch, name='vulnerability-patch'),
     path('dashboard-stats/', views.get_dashboard_stats, name='dashboard-stats'),
     # DAST endpoints (OWASP ZAP)
     path('dast/check-prerequisites/', views.check_dast_prerequisites_view, name='dast_check'),

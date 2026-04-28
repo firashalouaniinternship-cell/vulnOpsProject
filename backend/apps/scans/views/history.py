@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import get_object_or_404
 from ..models import ScanResult, ApiUsage
+from ..risk_scorer import compute_risk_score
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -31,12 +32,29 @@ def get_scan_detail(request, scan_id):
     except ScanResult.DoesNotExist:
         return Response({'error': 'Scan non trouvé'}, status=status.HTTP_404_NOT_FOUND)
 
-    vulns = scan.vulnerabilities.values(
-        'id', 'test_id', 'test_name', 'issue_text',
-        'severity', 'confidence', 'filename', 'line_number',
-        'line_range', 'code_snippet', 'cwe', 'more_info',
-        'llm_score', 'llm_explanation', 'is_sca', 'is_container', 'is_dast', 'solution'
-    )
+    vulns_data = []
+    for v in scan.vulnerabilities.all():
+        vulns_data.append({
+            'id':              v.id,
+            'test_id':         v.test_id,
+            'test_name':       v.test_name,
+            'issue_text':      v.issue_text,
+            'severity':        v.severity,
+            'confidence':      v.confidence,
+            'filename':        v.filename,
+            'line_number':     v.line_number,
+            'line_range':      v.line_range,
+            'code_snippet':    v.code_snippet,
+            'cwe':             v.cwe,
+            'more_info':       v.more_info,
+            'llm_score':       v.llm_score,
+            'llm_explanation': v.llm_explanation,
+            'is_sca':          v.is_sca,
+            'is_container':    v.is_container,
+            'is_dast':         v.is_dast,
+            'solution':        v.solution,
+            'risk_score':      compute_risk_score(v.severity, v.confidence, v.filename, v.llm_score),
+        })
 
     return Response({
         'id': scan.id,
@@ -67,7 +85,7 @@ def get_scan_detail(request, scan_id):
             'container_medium_count': scan.container_medium_count,
             'container_low_count': scan.container_low_count,
         },
-        'vulnerabilities': list(vulns),
+        'vulnerabilities': vulns_data,
     })
 
 @api_view(['GET'])

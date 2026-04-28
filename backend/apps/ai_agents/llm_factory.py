@@ -51,6 +51,6 @@ class LLMFactory:
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
 
-def get_best_model():
+def get_best_model(temperature: float = 0.0):
     """Helper to instantiate the LLM."""
-    return LLMFactory.get_llm()
+    return LLMFactory.get_llm(temperature=temperature)

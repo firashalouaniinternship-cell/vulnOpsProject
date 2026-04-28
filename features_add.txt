@@ -1,0 +1,66 @@
+🤖 2. Scoring intelligent des vulnérabilités
+🔍 Problème
+
+Les outils classiques donnent :
+
+trop de vulnérabilités
+mal priorisées
+💡 Solution
+
+Créer un score de risque dynamique
+
+⚙️ Facteurs :
+sévérité (CVSS)
+contexte (prod vs dev)
+exposition (API publique ?)
+fréquence du fichier modifié
+historique
+🧮 Exemple
+risk_score = (
+    severity * 0.4 +
+    exposure * 0.3 +
+    exploitability * 0.2 +
+    business_impact * 0.1
+)
+🔥 Résultat
+
+👉 Tu montres :
+
+“Top 5 vulnérabilités critiques”
+au lieu de 200 lignes inutiles
+💬 3. Chat intelligent avec le code
+
+👉 C’est une feature très différenciante
+
+🎯 Objectif
+
+Permettre au dev de poser :
+
+“Pourquoi cette vulnérabilité existe ?”
+“Comment la corriger ?”
+“Montre-moi un patch sécurisé”
+⚙️ Implémentation
+RAG + contexte du repo
+chunking du code
+embeddings
+Exemple UX :
+User: Pourquoi c’est vulnérable ?
+AI: Parce que tu concatènes directement une entrée utilisateur...
+🧠 4. Suggestions de correction automatiques
+🔥 Feature clé
+
+👉 Pas juste dire le problème → proposer du code
+
+Exemple :
+
+Input :
+
+query = "SELECT * FROM users WHERE id=" + user_input
+
+Output :
+
+query = "SELECT * FROM users WHERE id=%s"
+cursor.execute(query, (user_input,))
+⚠️ Important
+toujours expliquer la correction
+éviter modifications automatiques sans validation

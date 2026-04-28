@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     'apps.users',
     'apps.projects',
     'apps.scans',
+    'apps.ai_agents',
 ]
 
 MIDDLEWARE = [

@@ -32,10 +32,14 @@ export const endpoints = {
     autoScan: '/scanner/auto-scan/',
     analyze: '/scanner/analyze/',
     recommendation: (vulnId: number) => `/scanner/vulnerability/${vulnId}/recommendation/`,
+    patch: (vulnId: number) => `/scanner/vulnerability/${vulnId}/patch/`,
     dashboardStats: '/scanner/dashboard-stats/',
     dastCheck: '/scanner/dast/check-prerequisites/',
     dastScan: '/scanner/dast/scan/',
     dastAutoScan: '/scanner/dast/auto-scan/',
+  },
+  ai: {
+    chat: '/ai/chat/',
   },
   githubApp: {
     install: '/github-app/install/',

@@ -25,10 +25,9 @@ def test_nodes_sequentially():
     print("========================================")
     
     # Initialize empty state
-    # We will point it to a small directory like 'RagSystem' just for testing the analyzer
     state: GraphState = {
         "repo_url": "https://github.com/vulnops/test-repo",
-        "repo_path": os.path.abspath(os.path.join(os.path.dirname(__file__), "../RagSystem")),
+        "repo_path": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
         "project_context": {},
         "selected_scanners": [],
         "raw_scan_results": {},
@@ -79,7 +78,7 @@ def test_full_graph():
     
     initial_state = {
         "repo_url": "https://github.com/vulnops/test-repo",
-        "repo_path": os.path.abspath(os.path.join(os.path.dirname(__file__), "../RagSystem")),
+        "repo_path": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
         "auto_pr_enabled": False
     }
     

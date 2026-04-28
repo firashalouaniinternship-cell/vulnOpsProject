@@ -47,9 +47,10 @@ const ProjectsPage: React.FC = () => {
   const [dashboardStats, setDashboardStats] = useState<any>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState([
-    { role: 'assistant', text: 'Bonjour ! Je suis l\'assistant VulnOps. Comment puis-je vous aider aujourd\'hui ?' }
+    { role: 'assistant', text: 'Bonjour ! Je suis l\'assistant VulnOps. Posez-moi des questions sur vos vulnérabilités, vos scans ou les bonnes pratiques de sécurité.' }
   ]);
   const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
 
   // External Project State
   const [extUrl, setExtUrl] = useState('');
@@ -721,24 +722,56 @@ const ProjectsPage: React.FC = () => {
                 borderRadius: msg.role === 'user' ? '16px 16px 0 16px' : '16px 16px 16px 0',
                 maxWidth: '80%',
                 fontSize: '14px',
-                lineHeight: '1.5'
+                lineHeight: '1.5',
+                whiteSpace: 'pre-wrap',
               }}>
                 {msg.text}
               </div>
             ))}
+            {chatLoading && (
+              <div style={{
+                alignSelf: 'flex-start',
+                background: 'rgba(255,255,255,0.05)',
+                padding: '12px 16px',
+                borderRadius: '16px 16px 16px 0',
+                fontSize: '14px',
+                color: 'var(--text-dim)',
+                display: 'flex',
+                gap: '6px',
+                alignItems: 'center',
+              }}>
+                <Loader2 size={14} className="animate-spin" /> Analyse en cours…
+              </div>
+            )}
           </div>
 
           {/* Input */}
-          <form 
-            onSubmit={(e) => {
+          <form
+            onSubmit={async (e) => {
               e.preventDefault();
-              if (!chatInput.trim()) return;
-              setChatMessages([...chatMessages, { role: 'user', text: chatInput }]);
+              const msg = chatInput.trim();
+              if (!msg || chatLoading) return;
+
+              setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
               setChatInput('');
-              // Fake response
-              setTimeout(() => {
-                setChatMessages(prev => [...prev, { role: 'assistant', text: 'Je suis en cours de configuration. Posez-moi des questions sur vos vulnérabilités !' }]);
-              }, 1000);
+              setChatLoading(true);
+
+              try {
+                const response = await api.post(endpoints.ai.chat, {
+                  message: msg,
+                  repo_owner: user?.login || '',
+                  repo_name: '',
+                  project_context: {},
+                });
+                setChatMessages(prev => [...prev, { role: 'assistant', text: response.data.response }]);
+              } catch {
+                setChatMessages(prev => [...prev, {
+                  role: 'assistant',
+                  text: 'Désolé, une erreur est survenue. Vérifiez que le LLM (Ollama ou OpenRouter) est configuré.'
+                }]);
+              } finally {
+                setChatLoading(false);
+              }
             }}
             style={{ padding: '20px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: '12px' }}
           >
