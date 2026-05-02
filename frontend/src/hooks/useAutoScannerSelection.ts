@@ -80,6 +80,7 @@ interface UseAutoScannerSelectionReturn {
     runSca?: boolean,
     runSast?: boolean,
     runContainer?: boolean,
+    containerImage?: string,
     targets?: string[],
     branch?: string,
     scanMode?: 'fast' | 'standard' | 'deep'
@@ -143,6 +144,7 @@ export function useAutoScannerSelection(): UseAutoScannerSelectionReturn {
     runSca: boolean = false,
     runSast: boolean = true,
     runContainer: boolean = false,
+    containerImage: string = '',
     targets: string[] = [],
     branch?: string,
     scanMode: 'fast' | 'standard' | 'deep' = 'standard'
@@ -164,6 +166,7 @@ export function useAutoScannerSelection(): UseAutoScannerSelectionReturn {
           run_sast: runSast,
           run_sca: runSca,
           run_container: runContainer,
+          container_image: containerImage,
           targets: targets,
           branch: branch,
         }

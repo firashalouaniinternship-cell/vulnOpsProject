@@ -1,6 +1,26 @@
 version: '3.8'
 
 services:
+
+  # ─── Base de données ───────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: vulnops-postgres
+    environment:
+      POSTGRES_DB: vulnops
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Cache / Queue ─────────────────────────────────────────────────────────
   redis:
     image: redis:alpine
     container_name: vulnops-redis
@@ -8,4 +28,98 @@ services:
       - "6379:6379"
     restart: always
 
-# Note: PostgreSQL is running locally on the host machine.
+  # ─── Backend Django ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vulnops-backend
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker-in-Docker pour les scanners
+      - scan_tmp:/app/tmp_repos
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - OLLAMA_API_URL=http://ollama:11434/api/chat
+      - OLLAMA_MODEL=qwen2.5-coder:7b
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: on-failure
+
+  # ─── Celery Worker ─────────────────────────────────────────────────────────
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vulnops-celery
+    command: celery -A config worker --loglevel=info
+    volumes:
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker-in-Docker pour les scanners
+      - scan_tmp:/app/tmp_repos
+    env_file:
+      - ./backend/.env
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - OLLAMA_API_URL=http://ollama:11434/api/chat
+      - OLLAMA_MODEL=qwen2.5-coder:7b
+    depends_on:
+      - backend
+      - redis
+    restart: on-failure
+
+  # ─── Frontend React/Vite ───────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vulnops-frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    restart: on-failure
+
+  # ─── LLM Local (Ollama) ────────────────────────────────────────────────────
+  # Modèle utilisé : qwen2.5-coder:7b (~4.5 GB RAM) — optimisé pour l'analyse de code
+  # Après le premier lancement : docker exec -it vulnops-ollama ollama pull qwen2.5-coder:7b
+  ollama:
+    image: ollama/ollama:latest
+    container_name: vulnops-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: always
+    # Pour utiliser le GPU NVIDIA (optionnel) :
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  postgres_data:
+  ollama_data:
+  scan_tmp:      # répertoire partagé pour les repos clonés pendant les scans

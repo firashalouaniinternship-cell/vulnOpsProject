@@ -302,17 +302,19 @@ const AnalysisPage: React.FC = () => {
               <span style={{ fontWeight: 600, fontSize: '14px' }}>Explorateur</span>
               <FileText size={16} color="var(--text-dim)" />
             </div>
-            {loading || isTreeLoading ? (
-              <div style={{ padding: '20px', textAlign: 'center' }}>
-                <Loader2 size={24} className="animate-spin" />
-              </div>
-            ) : (
-              <FileTree
-                tree={tree}
-                selectedPaths={selectedPaths}
-                onSelectionChange={setSelectedPaths}
-              />
-            )}
+            <div className="tree-container">
+              {loading || isTreeLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                  <Loader2 size={24} className="animate-spin" />
+                </div>
+              ) : (
+                <FileTree
+                  tree={tree}
+                  selectedPaths={selectedPaths}
+                  onSelectionChange={setSelectedPaths}
+                />
+              )}
+            </div>
             <div className="panel-footer" style={{ padding: '16px', background: 'transparent' }}>
               <AutoScannerSimplified
                 repoFullName={`${owner}/${repo}`}

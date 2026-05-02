@@ -12,6 +12,7 @@ from rest_framework import status
 
 from ..models import ScanResult, Vulnerability
 from ..scanner_orchestrator import AutoScannerOrchestrator
+from ..risk_scorer import compute_risk_score
 from core.utils.repo_utils import clone_repo
 
 from scanners.sast.bandit_runner import run_full_scan as run_bandit_scan
@@ -24,10 +25,10 @@ from scanners.sast.psalm_runner import run_full_psalm_scan
 from scanners.sast.brakeman_runner import run_full_brakeman_scan
 from scanners.sast.clippy_runner import run_full_clippy_scan
 from scanners.sast.detekt_runner import run_full_detekt_scan
-from scanners.container.trivy_runner import run_trivy, parse_trivy_results
+from scanners.container.trivy_runner import run_trivy_fs, run_trivy_image, parse_trivy_results
 from scanners.dast.zaproxy_runner import run_zap_baseline_scan
 
-from rag.llm_scoring import get_direct_llm_score
+from rag.llm_scoring import get_batch_llm_scores
 
 logger = logging.getLogger(__name__)
 
@@ -59,26 +60,27 @@ def _get_token(request) -> str:
     return token or ''
 
 
-def _score_vuln(v: dict, context_summary: str) -> tuple[float, str]:
-    """Calls the LLM scoring service. Returns (score, reasoning)."""
-    try:
-        ai = get_direct_llm_score(
-            test_name=v['test_name'],
-            issue_text=v['issue_text'],
-            severity=v['severity'],
-            context_summary=context_summary,
-            code_snippet=v.get('code_snippet', ''),
-        )
-        return ai.get('score', 0.5), ai.get('reasoning', 'Analyse IA réussie')
-    except Exception as e:
-        logger.warning(f"AI scoring failed for {v.get('test_id', '?')}: {e}")
-        return 0.5, f'Erreur technique IA: {e}'
-
-
 def _build_vuln_objects(scan, vulns: list, context_summary: str, is_sca=False, is_container=False, is_dast=False):
+    if not vulns:
+        return []
+
+    try:
+        scores = get_batch_llm_scores(vulns, context_summary)
+    except Exception as e:
+        logger.warning(f"Batch LLM scoring failed, using defaults: {e}")
+        scores = [{"score": 0.5, "reasoning": f"Erreur IA: {e}"}] * len(vulns)
+
     objects = []
-    for v in vulns:
-        score, reasoning = _score_vuln(v, context_summary)
+    for v, ai in zip(vulns, scores):
+        score = float(ai.get("score", 0.5))
+        reasoning = ai.get("reasoning", "Analyse IA")
+        risk = compute_risk_score({
+            'severity': v.get('severity', 'LOW'),
+            'confidence': v.get('confidence', 'MEDIUM'),
+            'filename': v.get('filename', ''),
+            'is_dast': is_dast,
+            'llm_score': score,
+        })
         objects.append(Vulnerability(
             scan=scan,
             test_id=v.get('test_id', ''),
@@ -94,6 +96,7 @@ def _build_vuln_objects(scan, vulns: list, context_summary: str, is_sca=False, i
             more_info=(v.get('more_info') or '')[:1000],
             llm_score=score,
             llm_explanation=reasoning,
+            risk_score=risk,
             is_sca=is_sca,
             is_container=is_container,
             is_dast=is_dast,
@@ -217,12 +220,13 @@ def auto_trigger_scan(request):
     branch         = request.data.get('branch')
     targets        = request.data.get('targets', [])
 
-    scan_mode       = request.data.get('scan_mode', 'fast')
-    run_sast        = bool(request.data.get('run_sast', True))
-    run_sca         = bool(request.data.get('run_sca', False))
-    run_container   = bool(request.data.get('run_container', False))
-    run_dast        = bool(request.data.get('run_dast', False))
-    dast_target_url = request.data.get('dast_target_url', '').strip()
+    scan_mode        = request.data.get('scan_mode', 'fast')
+    run_sast         = bool(request.data.get('run_sast', True))
+    run_sca          = bool(request.data.get('run_sca', False))
+    run_container    = bool(request.data.get('run_container', False))
+    run_dast         = bool(request.data.get('run_dast', False))
+    dast_target_url  = request.data.get('dast_target_url', '').strip()
+    container_image  = request.data.get('container_image', '').strip()
 
     # ── Validation ─────────────────────────────────────────────────
     if not clone_url or not repo_full_name:
@@ -233,6 +237,9 @@ def auto_trigger_scan(request):
 
     if run_dast and not dast_target_url:
         return Response({'error': 'dast_target_url est requis quand run_dast=true'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if run_container and not container_image:
+        return Response({'error': 'container_image est requis quand run_container=true (ex: "myapp:latest")'}, status=status.HTTP_400_BAD_REQUEST)
 
     if not run_sast and not run_sca and not run_container and not run_dast:
         return Response({'error': 'Au moins un type de scan doit être activé'}, status=status.HTTP_400_BAD_REQUEST)
@@ -314,13 +321,13 @@ def auto_trigger_scan(request):
                 sast_result = _run_sast(scanner_type, clone_url, access_token,
                                         repo_owner, repo_name, repo_path, targets)
 
-                # ── SCA via Trivy ──────────────────────────────────
+                # ── SCA via Trivy fs (dependency files) ───────────
                 sca_vulns = []
                 if run_sca:
                     scan.sca_status = 'RUNNING'
                     scan.save()
                     try:
-                        trivy = run_trivy(repo_path, targets=targets)
+                        trivy = run_trivy_fs(repo_path, targets=targets)
                         if trivy['success']:
                             sca_vulns = parse_trivy_results(trivy['data'], repo_path)
                             for v in sca_vulns:
@@ -333,19 +340,19 @@ def auto_trigger_scan(request):
                         else:
                             scan.sca_status = 'FAILED'
                     except Exception as e:
-                        logger.error(f"SCA (Trivy) failed: {e}")
+                        logger.error(f"SCA (Trivy fs) failed: {e}")
                         scan.sca_status = 'FAILED'
                     scan.save()
 
-                # ── Container via Trivy ────────────────────────────
+                # ── Container via Trivy image ──────────────────────
                 container_vulns = []
                 if run_container:
                     scan.container_status = 'RUNNING'
                     scan.save()
                     try:
-                        trivy = run_trivy(repo_path, targets=targets)
+                        trivy = run_trivy_image(container_image)
                         if trivy['success']:
-                            container_vulns = parse_trivy_results(trivy['data'], repo_path)
+                            container_vulns = parse_trivy_results(trivy['data'], container_image)
                             for v in container_vulns:
                                 v['is_sca'] = False
                                 v['is_container'] = True
@@ -357,7 +364,7 @@ def auto_trigger_scan(request):
                         else:
                             scan.container_status = 'FAILED'
                     except Exception as e:
-                        logger.error(f"Container scan (Trivy) failed: {e}")
+                        logger.error(f"Container scan (Trivy image) failed: {e}")
                         scan.container_status = 'FAILED'
                     scan.save()
 
@@ -416,13 +423,17 @@ def auto_trigger_scan(request):
                 if run_sca:
                     scan.sca_status = 'RUNNING'
                     scan.save()
-                    trivy = run_trivy(repo_path, targets=targets)
+                    trivy = run_trivy_fs(repo_path, targets=targets)
                     if trivy['success']:
                         v_list = parse_trivy_results(trivy['data'], repo_path)
                         for v in v_list:
                             v['is_sca'] = True
+                            v['is_container'] = False
                         trivy_vulns += v_list
                         scan.sca_status = 'COMPLETED'
+                        scan.sca_high_count   = sum(1 for v in v_list if v['severity'] == 'HIGH')
+                        scan.sca_medium_count = sum(1 for v in v_list if v['severity'] == 'MEDIUM')
+                        scan.sca_low_count    = sum(1 for v in v_list if v['severity'] == 'LOW')
                     else:
                         scan.sca_status = 'FAILED'
                     scan.save()
@@ -430,13 +441,18 @@ def auto_trigger_scan(request):
                 if run_container:
                     scan.container_status = 'RUNNING'
                     scan.save()
-                    trivy = run_trivy(repo_path, targets=targets)
+                    trivy = run_trivy_image(container_image)
                     if trivy['success']:
-                        v_list = parse_trivy_results(trivy['data'], repo_path)
+                        v_list = parse_trivy_results(trivy['data'], container_image)
                         for v in v_list:
+                            v['is_sca'] = False
                             v['is_container'] = True
                         trivy_vulns += v_list
                         scan.container_status = 'COMPLETED'
+                        scan.container_critical_count = sum(1 for v in v_list if v['severity'] == 'CRITICAL')
+                        scan.container_high_count     = sum(1 for v in v_list if v['severity'] == 'HIGH')
+                        scan.container_medium_count   = sum(1 for v in v_list if v['severity'] == 'MEDIUM')
+                        scan.container_low_count      = sum(1 for v in v_list if v['severity'] == 'LOW')
                     else:
                         scan.container_status = 'FAILED'
                     scan.save()

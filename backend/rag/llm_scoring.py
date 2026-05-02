@@ -5,158 +5,160 @@ import logging
 import time
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-def get_direct_llm_score(test_name, issue_text, severity, context_summary, code_snippet=None):
+
+def _ollama_url() -> str:
+    url = os.getenv("OLLAMA_API_URL", "")
+    return url.replace("localhost", "127.0.0.1") if "localhost" in url else url
+
+
+def _llm_config() -> dict:
+    return {
+        "provider": os.getenv("LLM_PROVIDER", "ollama").lower(),
+        "ollama_url": _ollama_url(),
+        "ollama_model": os.getenv("OLLAMA_MODEL", "gemma4:31b-cloud"),
+        "api_key": os.getenv("OPENROUTER_API_KEY"),
+        "openrouter_model": os.getenv("OPENROUTER_MODEL", "google/gemma-4-31b-it:free"),
+    }
+
+
+def _call_ollama(cfg: dict, messages: list, timeout: int = 300) -> str:
+    data = {
+        "model": cfg["ollama_model"],
+        "messages": messages,
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": 0.3},
+    }
+    resp = requests.post(cfg["ollama_url"], json=data, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json().get("message", {}).get("content", "")
+
+
+def _call_openrouter(cfg: dict, messages: list, timeout: int = 60) -> str:
+    headers = {
+        "Authorization": f"Bearer {cfg['api_key']}",
+        "Content-Type": "application/json",
+    }
+    data = {
+        "model": cfg["openrouter_model"],
+        "messages": messages,
+        "response_format": {"type": "json_object"},
+    }
+    delay = 2
+    for attempt in range(3):
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers, json=data, timeout=timeout,
+        )
+        if resp.status_code == 429:
+            time.sleep(delay)
+            delay *= 2
+            continue
+        resp.raise_for_status()
+        return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+    return ""
+
+
+def _parse_json(raw: str) -> dict | list:
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        lines = lines[1:] if lines[0].startswith("```") else lines
+        lines = lines[:-1] if lines and lines[-1].startswith("```") else lines
+        cleaned = "\n".join(lines).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        import re
+        match = re.search(r'[\[{].*[\]}]', cleaned, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise
+
+
+def get_batch_llm_scores(vulns: list, context_summary: str, batch_size: int = 25) -> list:
     """
-    Appelle directement le LLM (Ollama ou OpenRouter) pour obtenir un score de priorité.
-    Bypasse le système RAG pour plus de rapidité et de robustesse.
+    Scores all vulnerabilities in batches of `batch_size` with a single LLM call per batch.
+    Returns a list of {"score": float, "reasoning": str} in the same order as `vulns`.
+    Falls back to score=0.5 for any vuln that fails.
     """
-    ollama_url = os.getenv("OLLAMA_API_URL")
-    ollama_model = os.getenv("OLLAMA_MODEL", "gemma4:31b-cloud")
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    openrouter_model = os.getenv("OPENROUTER_MODEL", "google/gemma-4-31b-it:free")
-    provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+    if not vulns:
+        return []
 
-    # Utiliser 127.0.0.1 pour plus de stabilité sur Windows si localhost est fourni
-    if ollama_url and "localhost" in ollama_url:
-        ollama_url = ollama_url.replace("localhost", "127.0.0.1")
+    cfg = _llm_config()
+    results = [{"score": 0.5, "reasoning": "Non scoré"} for _ in vulns]
 
-    system_prompt = "You are a specialized Security Project Lead. Your goal is to prioritize vulnerabilities for developers."
-    
-    vuln_details = f"Vulnérabilité: {test_name}\nDescription: {issue_text}\nSévérité: {severity}"
-    if code_snippet:
-        vuln_details += f"\nCode Concerné:\n{code_snippet}"
+    for batch_start in range(0, len(vulns), batch_size):
+        batch = vulns[batch_start: batch_start + batch_size]
+        vuln_lines = []
+        for i, v in enumerate(batch):
+            snippet = v.get("code_snippet", "")
+            line = f"[{i}] {v.get('test_name', '?')} | {v.get('severity', '?')} | {v.get('issue_text', '')[:120]}"
+            if snippet:
+                line += f" | code: {snippet[:80]}"
+            vuln_lines.append(line)
 
-    user_prompt = (
-        f"En tant qu'expert en sécurité, analyse et donne un SCORE DE PRIORITÉ à cette vulnérabilité dans le contexte global du projet.\n\n"
-        f"CONTEXTE DU PROJET (Autres menaces détectées) :\n{context_summary}\n\n"
-        f"DÉTAILS DE LA VULNÉRABILITÉ À SCORER :\n{vuln_details}\n\n"
-        "Donne un score entre 0.0 et 1.0 (1.0 = priorité absolue de correction).\n"
-        "Le score doit être relatif aux autres menaces citées dans le contexte.\n"
-        "Réponds UNIQUEMENT sous format JSON : {\"score\": 0.85, \"reasoning\": \"explication courte en français\"}"
-    )
+        user_prompt = (
+            f"Contexte du projet : {context_summary}\n\n"
+            f"Donne un score de priorité (0.0–1.0) à chacune de ces {len(batch)} vulnérabilités.\n"
+            "Réponds UNIQUEMENT avec un tableau JSON :\n"
+            '[{"index":0,"score":0.85,"reasoning":"..."},{"index":1,"score":0.4,"reasoning":"..."},...]\n\n'
+            "Vulnérabilités :\n" + "\n".join(vuln_lines)
+        )
+        messages = [
+            {"role": "system", "content": "You are a security expert. Prioritize vulnerabilities. Reply only with valid JSON array."},
+            {"role": "user", "content": user_prompt},
+        ]
 
-    if provider == "ollama":
-        if not ollama_url:
-            logger.error("Configuration OLLAMA_API_URL manquante pour le fournisseur: ollama")
-            return {"score": 0.5, "reasoning": "Scoring failed: Missing OLLAMA configuration"}
         try:
-            logger.info(f"Appel JSON Ollama ({ollama_model}) pour {test_name}...")
-            data = {
-                "model": ollama_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0.3}
-            }
-            response = requests.post(ollama_url, json=data, timeout=300) # Timeout 5 min
-            if response.status_code == 200:
-                result = response.json().get("message", {}).get("content", "")
-                if not result:
-                     logger.warning("Réponse Ollama vide")
-                     return {"score": 0.5, "reasoning": "Scoring failed: Empty response"}
-                
-                logger.info(f"Connecté avec succès au LLM (Local/Ollama - {ollama_model})")
-                
-                cleaned_result = result.strip()
-                if cleaned_result.startswith("```"):
-                    lines = cleaned_result.splitlines()
-                    if lines[0].startswith("```"): lines = lines[1:]
-                    if lines and lines[-1].startswith("```"): lines = lines[:-1]
-                    cleaned_result = "\n".join(lines).strip()
-                
-                try:
-                    return json.loads(cleaned_result)
-                except json.JSONDecodeError:
-                    import re
-                    match = re.search(r'\{.*\}', cleaned_result, re.DOTALL)
-                    if match:
-                        return json.loads(match.group())
-                    raise
+            if cfg["provider"] == "ollama":
+                if not cfg["ollama_url"]:
+                    logger.error("OLLAMA_API_URL manquant")
+                    continue
+                raw = _call_ollama(cfg, messages)
+            elif cfg["provider"] == "openrouter":
+                if not cfg["api_key"]:
+                    logger.error("OPENROUTER_API_KEY manquant")
+                    continue
+                raw = _call_openrouter(cfg, messages)
             else:
-                logger.warning(f"Ollama a retourné une erreur {response.status_code}: {response.text}")
-                return {"score": 0.5, "reasoning": f"Scoring failed: HTTP {response.status_code}"}
-        except json.JSONDecodeError as e:
-            logger.error(f"Erreur de décodage JSON Ollama. Texte reçu: {response.text if 'response' in locals() else 'N/A'}")
-            return {"score": 0.5, "reasoning": f"Scoring failed: Invalid JSON format"}
+                logger.error(f"LLM_PROVIDER inconnu: {cfg['provider']}")
+                continue
+
+            parsed = _parse_json(raw)
+            if isinstance(parsed, dict) and "scores" in parsed:
+                parsed = parsed["scores"]
+            if not isinstance(parsed, list):
+                logger.warning(f"Réponse batch LLM inattendue: {type(parsed)}")
+                continue
+
+            for item in parsed:
+                idx = item.get("index")
+                if idx is None or not (0 <= idx < len(batch)):
+                    continue
+                results[batch_start + idx] = {
+                    "score": float(item.get("score", 0.5)),
+                    "reasoning": item.get("reasoning", "Analyse IA"),
+                }
+
         except Exception as e:
-            logger.error(f"Erreur lors de l'appel direct Ollama : {e}")
-            return {"score": 0.5, "reasoning": f"Scoring failed: {str(e)}"}
+            logger.error(f"Batch LLM scoring failed (batch {batch_start}): {e}")
 
-    elif provider == "openrouter":
-        if not api_key:
-            logger.error("Configuration OPENROUTER_API_KEY manquante pour le fournisseur: openrouter")
-            return {"score": 0.5, "reasoning": "Scoring failed: Missing OpenRouter configuration"}
-        
-        max_retries = 3
-        retry_delay = 2 # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"Appel JSON OpenRouter ({openrouter_model}) pour {test_name} (Tentative {attempt+1}/{max_retries})...")
-                headers = {
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
-                }
-                data = {
-                    "model": openrouter_model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "response_format": {"type": "json_object"}
-                }
-                response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=60)
-                
-                if response.status_code == 429:
-                    logger.warning(f"OpenRouter 429 (Rate Limit). Attente de {retry_delay}s avant retry...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2 # Backoff exponentiel
-                    continue
+    return results
 
-                if response.status_code == 200:
-                    result = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                    
-                    logger.info(f"Connecté avec succès au LLM (OpenRouter - {openrouter_model})")
-                    
-                    cleaned_result = result.strip()
-                    if cleaned_result.startswith("```"):
-                        lines = cleaned_result.splitlines()
-                        if lines[0].startswith("```"): lines = lines[1:]
-                        if lines and lines[-1].startswith("```"): lines = lines[:-1]
-                        cleaned_result = "\n".join(lines).strip()
-
-                    try:
-                        return json.loads(cleaned_result)
-                    except json.JSONDecodeError:
-                        import re
-                        match = re.search(r'\{.*\}', cleaned_result, re.DOTALL)
-                        if match:
-                            return json.loads(match.group())
-                        raise
-                else:
-                    logger.warning(f"OpenRouter a retourné une erreur {response.status_code}")
-                    if attempt < max_retries - 1:
-                        time.sleep(1)
-                        continue
-                    return {"score": 0.5, "reasoning": f"Scoring failed: HTTP {response.status_code}"}
-            except Exception as e:
-                logger.error(f"Erreur lors de l'appel OpenRouter (Tentative {attempt+1}) : {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(1)
-                    continue
-                return {"score": 0.5, "reasoning": f"Scoring failed: OpenRouter {str(e)}"}
-        
-        return {"score": 0.5, "reasoning": "Scoring failed after multiple retries"}
-    else:
-        logger.error(f"LLM_PROVIDER inconnu: {provider}")
-        return {"score": 0.5, "reasoning": f"Scoring failed: Unknown LLM_PROVIDER {provider}"}
+def get_direct_llm_score(test_name, issue_text, severity, context_summary, code_snippet=None):
+    """Single-vuln scoring — delegates to the batch helper for consistency."""
+    vuln = {
+        "test_name": test_name,
+        "issue_text": issue_text,
+        "severity": severity,
+        "code_snippet": code_snippet or "",
+    }
+    scores = get_batch_llm_scores([vuln], context_summary)
+    return scores[0] if scores else {"score": 0.5, "reasoning": "Scoring failed"}
 
 

@@ -53,7 +53,13 @@ def get_scan_detail(request, scan_id):
             'is_container':    v.is_container,
             'is_dast':         v.is_dast,
             'solution':        v.solution,
-            'risk_score':      compute_risk_score(v.severity, v.confidence, v.filename, v.llm_score),
+            'risk_score':      compute_risk_score({
+                'severity': v.severity,
+                'confidence': v.confidence,
+                'filename': v.filename,
+                'is_dast': v.is_dast,
+                'llm_score': v.llm_score
+            }),
         })
 
     return Response({

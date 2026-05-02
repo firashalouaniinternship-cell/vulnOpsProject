@@ -134,6 +134,7 @@ export function AutoScannerSimplified({
     container: false,
     dast: false
   });
+  const [containerImage, setContainerImage] = useState('');
 
   const SCAN_MODES: { id: 'fast' | 'standard' | 'deep'; label: string; desc: string; color: string }[] = [
     { id: 'fast',     label: '⚡ Fast',     desc: 'Semgrep uniquement, < 2 min',            color: '#10b981' },
@@ -202,6 +203,7 @@ export function AutoScannerSimplified({
           enabledScanners.sca,
           enabledScanners.sast,
           enabledScanners.container,
+          containerImage,
           selectedPaths,
           branch,
           activeScanMode
@@ -291,8 +293,9 @@ export function AutoScannerSimplified({
     });
   };
 
-  const isAnyEnabled = enabledScanners.sast || enabledScanners.sca || enabledScanners.container || enabledScanners.dast;
-  const isAllEnabled = enabledScanners.sast && enabledScanners.sca && enabledScanners.container && enabledScanners.dast;
+  const isContainerReady = !enabledScanners.container || containerImage.trim() !== '';
+  const isAnyEnabled = (enabledScanners.sast || enabledScanners.sca || enabledScanners.container || enabledScanners.dast) && isContainerReady;
+  const isAllEnabled = enabledScanners.sast && enabledScanners.sca && enabledScanners.container && enabledScanners.dast && containerImage.trim() !== '';
 
 
   if (!selectedScanner) {
@@ -315,71 +318,64 @@ export function AutoScannerSimplified({
 
   return (
     <div className={`auto-scanner-simplified ${className}`}>
-      {/* Show analysis details at the top */}
-      {analysis && (
-        <div className="analysis-info" style={{ marginBottom: '16px' }}>
-          <button
-            className="info-toggle"
-            onClick={() => setShowDetails(!showDetails)}
-          >
-            {showDetails ? '▼' : '▶'} Détails de code
-          </button>
+      <div className="scanner-selection-area">
+        {/* Header row: label + détails toggle */}
+        <div className="scanner-header">
+          <p className="auto-detected">🤖 Auto-Detected Scanner</p>
+          {analysis && (
+            <button
+              className="info-toggle"
+              onClick={() => setShowDetails(!showDetails)}
+              title="Voir les détails de détection"
+            >
+              {showDetails ? '▼' : '▶'} Détails
+            </button>
+          )}
+        </div>
 
-          {showDetails && (
-            <div className="analysis-details">
-              <div className="detail-row">
-                <span className="label">Langages détectés :</span>
-                <span className="value">
-                  {analysis.analysis?.languages?.join(', ') || 'N/A'}
-                </span>
-              </div>
+        {/* Collapsible details — shown inline below the header */}
+        {analysis && showDetails && (
+          <div className="analysis-details">
+            <div className="detail-row">
+              <span className="label">Langages détectés :</span>
+              <span className="value">
+                {analysis.analysis?.languages?.join(', ') || 'N/A'}
+              </span>
+            </div>
 
-              {analysis.analysis?.frameworks &&
-                Object.keys(analysis.analysis.frameworks).length > 0 && (
-                  <div className="detail-row">
-                    <span className="label">Frameworks :</span>
-                    <span className="value">
-                      {Object.entries(analysis.analysis.frameworks)
-                        .map(([lang, fw]: [string, any]) => `${lang}: ${fw.join(', ')}`)
-                        .join(' | ')}
-                    </span>
-                  </div>
-                )}
-
-              <div className="detail-row">
-                <span className="label">Confiance :</span>
-                <div className="confidence-bar">
-                  <div
-                    className="confidence-fill"
-                    style={{
-                      width: `${(analysis.confidence || 0) * 100}%`,
-                      backgroundColor: scannerInfo.color
-                    }}
-                  ></div>
-                  <span className="confidence-text">
-                    {((analysis.confidence || 0) * 100).toFixed(0)}%
-                  </span>
-                </div>
-              </div>
-
-              {analysis.reasoning && (
+            {analysis.analysis?.frameworks &&
+              Object.keys(analysis.analysis.frameworks).length > 0 && (
                 <div className="detail-row">
-                  <span className="label">Pourquoi ce scanner ? :</span>
-                  <p className="reasoning">{analysis.reasoning}</p>
+                  <span className="label">Frameworks :</span>
+                  <span className="value">
+                    {Object.entries(analysis.analysis.frameworks)
+                      .map(([lang, fw]: [string, any]) => `${lang}: ${fw.join(', ')}`)
+                      .join(' | ')}
+                  </span>
                 </div>
               )}
 
-
+            <div className="detail-row">
+              <span className="label">Confiance :</span>
+              <div className="confidence-bar">
+                <div
+                  className="confidence-fill"
+                  style={{ width: `${(analysis.confidence || 0) * 100}%`, backgroundColor: scannerInfo.color }}
+                />
+                <span className="confidence-text">
+                  {((analysis.confidence || 0) * 100).toFixed(0)}%
+                </span>
+              </div>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* Main Scanner Section */}
-      <div className="scanner-selection-area">
-        <div className="scanner-header">
-          <p className="auto-detected">🤖 Auto-Detected Scanner:</p>
-        </div>
+            {analysis.reasoning && (
+              <div className="detail-row">
+                <span className="label">Pourquoi ce scanner ?</span>
+                <p className="reasoning">{analysis.reasoning}</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Scan Mode Selector */}
         <div style={{
@@ -485,6 +481,36 @@ export function AutoScannerSimplified({
                 {(enabledScanners as any)[type.id] && <Check size={14} color="var(--primary)" style={{ marginLeft: 'auto' }} />}
               </label>
             ))}
+
+            {enabledScanners.container && (
+              <div style={{ 
+                marginTop: '4px', 
+                padding: '10px', 
+                background: 'rgba(255, 255, 255, 0.02)', 
+                border: '1px dashed var(--border)', 
+                borderRadius: '6px' 
+              }}>
+                <span style={{ fontSize: '11px', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>
+                  Image Container à scanner (ex: myapp:latest)
+                </span>
+                <input
+                  type="text"
+                  value={containerImage}
+                  onChange={(e) => setContainerImage(e.target.value)}
+                  placeholder="image-name:tag"
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    background: 'rgba(0, 0, 0, 0.2)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '4px',
+                    color: 'white',
+                    fontSize: '12px',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -577,14 +603,15 @@ export function AutoScannerSimplified({
         .scanner-header {
           display: flex;
           align-items: center;
+          justify-content: space-between;
           gap: 8px;
         }
-        
+
         .auto-detected {
           margin: 0;
-          font-size: 13px;
+          font-size: 11px;
           font-weight: 600;
-          color: #666;
+          color: var(--text-dim);
           text-transform: uppercase;
           letter-spacing: 0.5px;
         }
@@ -671,86 +698,88 @@ export function AutoScannerSimplified({
         }
         
         .info-toggle {
-          width: 100%;
-          padding: 10px;
-          background-color: #f5f5f5;
-          border: 1px solid #e0e0e0;
+          padding: 4px 8px;
+          background: rgba(255, 255, 255, 0.06);
+          border: 1px solid var(--border);
           border-radius: 4px;
           cursor: pointer;
-          font-size: 13px;
+          font-size: 11px;
           font-weight: 600;
-          color: #666;
+          color: var(--text-dim);
+          white-space: nowrap;
           transition: all 0.2s ease;
+          font-family: inherit;
         }
-        
+
         .info-toggle:hover {
-          background-color: #eeeeee;
+          background: rgba(255, 255, 255, 0.1);
+          color: white;
         }
-        
+
         .analysis-details {
-          margin-top: 8px;
-          padding: 12px;
-          background-color: #fafafa;
-          border: 1px solid #e0e0e0;
-          border-radius: 4px;
+          padding: 10px 12px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid var(--border);
+          border-radius: 6px;
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: 8px;
         }
-        
+
         .detail-row {
           display: flex;
           flex-direction: column;
-          gap: 6px;
+          gap: 4px;
         }
-        
+
         .label {
-          font-size: 12px;
+          font-size: 10px;
           font-weight: 600;
-          color: #666;
+          color: var(--text-dim);
           text-transform: uppercase;
           letter-spacing: 0.3px;
         }
-        
+
         .value {
-          font-size: 13px;
-          color: #333;
+          font-size: 12px;
+          color: var(--text-bright, white);
         }
-        
+
         .confidence-bar {
           position: relative;
           width: 100%;
-          height: 24px;
-          background-color: #e0e0e0;
+          height: 20px;
+          background: rgba(255, 255, 255, 0.08);
           border-radius: 4px;
           overflow: hidden;
         }
-        
+
         .confidence-fill {
           height: 100%;
           transition: width 0.3s ease;
+          opacity: 0.85;
         }
-        
+
         .confidence-text {
           position: absolute;
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 600;
           color: white;
-          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
         }
-        
+
         .reasoning {
           margin: 0;
-          font-size: 12px;
-          color: #555;
+          font-size: 11px;
+          color: var(--text-dim);
           font-style: italic;
-          background-color: white;
-          padding: 8px;
+          padding: 6px 8px;
           border-radius: 3px;
-          border-left: 3px solid #667eea;
+          border-left: 2px solid var(--primary);
+          background: rgba(99, 102, 241, 0.06);
         }
         
 
